@@ -1,0 +1,198 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /MotionPlanning1
+        - /MotionPlanning1/Scene Robot1
+        - /MotionPlanning1/Planning Request1
+  - Class: rviz_common/Help
+    Name: Help
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Value: true
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Value: false
+    # ── Camera: point cloud (3D) + color image (2D) ────────────────────────
+    # The point cloud is the stream fed to obstacle_manager and has **xyz only**
+    # (deliberately no rgb, see _make_pointcloud in orbbec_camera_node.py), so
+    # it is colored by the Z axis here — it is meant to show "what is in the
+    # scene and how high it is", not to show the image itself.
+    # To look at the image, use the color image stream below. Both live in
+    # camera_color_optical_frame and are attached to base_link via ee_link's
+    # static TF.
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Camera Point Cloud
+      Enabled: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /camera/depth/points
+      Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.01
+      Style: Points
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Name: Camera Color Image
+      Enabled: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /camera/color/image
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Normalize Range: true
+      Value: true
+    # /servo/target_pose: the **absolute position** in base_link of the target
+    # detected by the camera. Both the virtual camera and the real camera publish
+    # this topic (same semantics: the object's estimated pose in base_link), so
+    # this one display works for both. The Axes shape is used so that position
+    # and orientation are both readable at a glance —
+    # ⚠ the orientation is always the identity quaternion (a single view cannot
+    #   observe the object's own orientation), so those three axes only mean
+    #   "world frame", not an estimated attitude; **what to verify is the origin
+    #   position**.
+    # ⚠ when detection is lost the node **stops publishing**, and this display
+    #   has no decay ⇒ it keeps showing the last position without moving. To tell
+    #   whether it is still alive, check the "Camera Color Image" cell too.
+    - Class: rviz_default_plugins/Pose
+      Name: Visual Target /servo/target_pose
+      Enabled: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /servo/target_pose
+      Alpha: 1
+      Axes Length: 0.12
+      Axes Radius: 0.012
+      Color: 255; 0; 255
+      Head Length: 0.07
+      Head Radius: 0.03
+      Shaft Length: 0.12
+      Shaft Radius: 0.012
+      Shape: Axes
+      Value: true
+    - Class: moveit_rviz_plugin/MotionPlanning
+      Name: MotionPlanning
+      Planned Path:
+        Loop Animation: true
+        State Display Time: 0.05 s
+        Trajectory Topic: display_planned_path
+        # Trajectory point display interval: the denser the trajectory points,
+        # the smoother the replay in RViz but the more CPU it consumes
+        Interrupt Display: false
+        Show Robot Visual: true
+        Show Robot Collision: false
+        Links:
+          base_link:
+            Show Axes: false
+            Show Trail: false
+          ee_link:
+            Show Axes: true
+            Show Trail: false
+      Planning Metrics:
+        Payload: 1
+        Show Joint Torques: false
+        Show Manipulability: false
+        Show Manipulability Index: false
+        Show Weight Limit: false
+        Show Reachability: false
+        Show Collision: false
+      Planning Request:
+        Colliding Link Color: 255; 0; 0
+        Goal State Alpha: 1
+        Goal State Color: 250; 128; 0
+        Planning Group: litearm_arm
+        Query Goal State: true
+        Query Start State: false
+        Show Workspace: false
+        Start State Alpha: 1
+        Start State Color: 0; 255; 0
+      Planning Scene Topic: monitored_planning_scene
+      Robot Description: robot_description
+      Scene Geometry:
+        Scene Alpha: 1
+        Show Scene Geometry: true
+        Voxel Coloring: Z-Axis
+        Voxel Rendering: Occupied Voxels
+      Scene Robot:
+        Robot Alpha: 0.5
+        Show Scene Robot: true
+      Value: true
+      Move Group Namespace: ""
+      # Show collision contact points: useful when tuning the collision matrix
+      # or investigating "why is this configuration judged to be in self-collision"
+      Collision Contacts: 30
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: base_link
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 1.6
+      Focal Point:
+        X: 0.0
+        Y: 0.0
+        Z: 0.35
+      Name: Current View
+      Pitch: 0.35
+      Target Frame: base_link
+      Yaw: -0.8
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 975
+  Help:
+    collapsed: false
+  Hide Left Dock: false
+  Hide Right Dock: false
+  MotionPlanning:
+    collapsed: false
+  MotionPlanning - Trajectory Slider:
+    collapsed: false
+  QMainWindow State: 000000ff00000000fd0000000100000000000002b400000375fc0200000005fb00000044004d006f00740069006f006e0050006c0061006e006e0069006e00670020002d0020005400720061006a006500630074006f0072007900200053006c00690064006500720000000000ffffffff0000004100fffffffb000000100044006900730070006c006100790073010000003d00000123000000c900fffffffb0000001c004d006f00740069006f006e0050006c0061006e006e0069006e00670100000166000001910000018800fffffffb0000000800480065006c0070000000029a0000006e0000006e00fffffffb0000000a0056006900650077007301000002fd000000b5000000a400ffffff000001f60000037500000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Views:
+    collapsed: false
+  Width: 1200
