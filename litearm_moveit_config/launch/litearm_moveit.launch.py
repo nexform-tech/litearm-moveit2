@@ -1,56 +1,48 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""litearm_moveit.launch.py — bring up litearm's MoveIt planning stack
-(optionally together with the low-level control stack).
+"""litearm_moveit.launch.py — 起 litearm 的 MoveIt 规划栈（可选含底层控制栈）。
 
-Combine as needed:
+按需组合：
 
-    1. control stack   litearm_ros2_control/litearm_control.launch.py
-                       (hardware daemon + controller_manager + JSB + JTC)
-    2. move_group      MoveIt planning node (OMPL + KDL)
-    3. RViz            MoveIt motion planning panel
+    1. 控制栈   litearm_ros2_control/litearm_control.launch.py
+                （硬件守护进程 + controller_manager + JSB + JTC）
+    2. move_group   MoveIt 规划节点（OMPL + KDL）
+    3. RViz     MoveIt 运动规划面板
 
-By default all three come up together. If the control stack is already running
-elsewhere (e.g. started by hand while debugging the real robot), use
-start_control:=false to bring up only the MoveIt part, so that two
-controller_managers do not fight over the same set of command interfaces.
+默认三件一起起。若控制栈已在别处运行（例如真机调试时手动起的），
+用 start_control:=false 只起 MoveIt 部分，避免两个 controller_manager
+抢同一批命令接口。
 
-    # real robot (board powered, USB connected, license activated)
+    # 真机（板子已上电、USB 已连、license 已激活）
     ros2 launch litearm_moveit_config litearm_moveit.launch.py
 
-    # full-stack dry run without hardware
+    # 无硬件全链路演练
     ros2 launch litearm_moveit_config litearm_moveit.launch.py dry_run:=true
 
-    # MoveIt only (control stack already running)
+    # 只起 MoveIt（控制栈已在运行）
     ros2 launch litearm_moveit_config litearm_moveit.launch.py start_control:=false
 
-Feedforward is computed by the **firmware** (no switch to turn on here): the PD
-gains and the gravity/friction/integral/kd_extra feedforward all live in the
-litearm-stm32 firmware, whose model is generated from the URDF and compiled into
-the firmware. On the default channel (MOVE_JS) there is **no M·q̈ or C·q̇** —
-MOVE_JS has no acceleration source.
+前馈由**固件**算（无需在这里开任何开关）：PD 增益与重力/摩擦/积分/kd_extra
+前馈都在 litearm-stm32 固件里，模型由 URDF 生成、编译进固件。默认通道
+（MOVE_JS）下**没有 M·q̈ 与 C·q̇**——MOVE_JS 没有加速度源。
 
-The five switches below are **tri-state**, default empty = leave the firmware
-alone (the firmware's factory mask already carries
-G/inertia/Coriolis/friction/integral/quantization/velocity reference):
+下面五个开关是**三态**，默认空 = 不碰固件（固件出厂掩码已带 G/惯量/科氏/摩擦/
+积分/量化/速度参考）：
 
-    gravity_compensation:=true|false    overrides FF_G
-    friction_compensation:=true|false   overrides FF_FRICTION
-    inertia_compensation:=true|false    overrides FF_INERTIA|FF_CORIOLIS
-                                        (no effect on MOVE_JS)
-    integral_compensation:=true|false   overrides FF_INTEGRAL
-    damping_compensation:=true|false    overrides the kd_extra vector
-                                        (true = restore factory values)
+    gravity_compensation:=true|false    覆盖 FF_G
+    friction_compensation:=true|false   覆盖 FF_FRICTION
+    inertia_compensation:=true|false    覆盖 FF_INERTIA|FF_CORIOLIS（MOVE_JS 下无效）
+    integral_compensation:=true|false   覆盖 FF_INTEGRAL
+    damping_compensation:=true|false    覆盖 kd_extra 向量（true = 恢复出厂值）
 
-To fall back to pure PD (e.g. for an A/B comparison), set all five to false:
+要退回纯 PD（例如 A/B 对照），五项都给 false：
     ros2 launch litearm_moveit_config litearm_moveit.launch.py \\
         gravity_compensation:=false friction_compensation:=false \\
         inertia_compensation:=false integral_compensation:=false \\
         damping_compensation:=false
 
-To compute feedforward yourself (KP/Kd/effort applied every frame), use the
-control stack's mit_passthrough:=true and change the
-joint_trajectory_controller command_interfaces to the matching combination.
+想自己算前馈（KP/Kd/effort 逐帧生效）请用控制栈的 mit_passthrough:=true，
+并把 joint_trajectory_controller 的 command_interfaces 改成相应组合。
 """
 
 import os
@@ -74,57 +66,45 @@ def _is_true(value: str) -> bool:
 def _declare_arguments():
     return [
         DeclareLaunchArgument("start_control", default_value="true",
-                              description="whether to start the ros2_control stack as well"),
+                              description="是否一并启动 ros2_control 控制栈"),
         DeclareLaunchArgument("dry_run", default_value="false",
-                              description="passed through to the control stack: true = hardware-free mode"),
+                              description="透传给控制栈：true = 无硬件模式"),
         DeclareLaunchArgument("use_rviz", default_value="true",
-                              description="whether to start RViz2 (the MoveIt motion planning panel)"),
+                              description="是否启动 RViz2（MoveIt 运动规划面板）"),
         DeclareLaunchArgument("port", default_value="",
-                              description="passed through to the control stack: USB CDC "
-                                          "device path of the litearm-stm32, empty = "
-                                          "auto-detect (1d50:606f)"),
+                              description="透传给控制栈：litearm-stm32 的 USB CDC "
+                                          "设备路径，留空 = 自动发现（1d50:606f）"),
         DeclareLaunchArgument("shm_name", default_value="/litearm_hw",
-                              description="passed through to the control stack: shared memory segment name"),
+                              description="透传给控制栈：共享内存段名"),
         DeclareLaunchArgument("daemon_rate_hz", default_value="0",
-                              description="passed through to the control stack: daemon "
-                                          "command rate, 0 = use the default"),
-        # The five feedforward switches are **tri-state**: default empty = leave
-        # the firmware alone (the firmware has its own factory mask, which
-        # already carries G/inertia/Coriolis/friction/integral/quantization/
-        # velocity reference).
-        # Before the lower layer was swapped this was true here (the daemon
-        # stacked its own feedforward on tau_ff); now that the firmware computes
-        # it, passing true merely "re-sets a bit that is already set" — harmless
-        # but meaningless, and it makes people think the MoveIt entry point and
-        # starting the control stack directly are two different behaviours.
+                              description="透传给控制栈：守护进程命令下发频率，0 = 用默认值"),
+        # 五个前馈开关是**三态**：默认空 = 不碰固件（固件自己有出厂掩码，
+        # 出厂就带 G/惯量/科氏/摩擦/积分/量化/速度参考）。
+        # 换底层之前这里是 true（守护进程在 tau_ff 上自己叠前馈）；现在前馈
+        # 由固件算，再传 true 只是"把已经开着的位再置一次"——无害但没意义，
+        # 反而会让人以为 MoveIt 入口和直接起控制栈是两套行为。
         DeclareLaunchArgument("gravity_compensation", default_value="",
-                              description="passed through to the control stack: overrides the "
-                                          "FF_G bit of the firmware ff_mask "
-                                          "(empty = leave the firmware alone, true/false = set/clear)"),
+                              description="透传给控制栈：覆盖固件 ff_mask 的 FF_G 位"
+                                          "（空 = 不碰固件，true/false = 置位/清位）"),
         DeclareLaunchArgument("friction_compensation", default_value="",
-                              description="passed through to the control stack: overrides the "
-                                          "FF_FRICTION bit of the firmware ff_mask"),
+                              description="透传给控制栈：覆盖固件 ff_mask 的 FF_FRICTION 位"),
         DeclareLaunchArgument("inertia_compensation", default_value="",
-                              description="passed through to the control stack: overrides the "
-                                          "FF_INERTIA|FF_CORIOLIS bits of the firmware ff_mask "
-                                          "(⚠ on the MOVE_JS channel the firmware does not "
-                                          "compute inertia terms, so setting them is useless)"),
+                              description="透传给控制栈：覆盖固件 ff_mask 的 "
+                                          "FF_INERTIA|FF_CORIOLIS 位（⚠ MOVE_JS 通道下"
+                                          "固件不算惯量项，置位无用）"),
         DeclareLaunchArgument("integral_compensation", default_value="",
-                              description="passed through to the control stack: overrides the "
-                                          "FF_INTEGRAL bit of the firmware ff_mask"),
+                              description="透传给控制栈：覆盖固件 ff_mask 的 FF_INTEGRAL 位"),
         DeclareLaunchArgument("damping_compensation", default_value="",
-                              description="passed through to the control stack: overrides the "
-                                          "firmware kd_extra vector "
-                                          "(false = zero it, true = restore factory values)"),
+                              description="透传给控制栈：覆盖固件 kd_extra 向量"
+                                          "（false = 清零，true = 恢复出厂值）"),
         DeclareLaunchArgument("log_level", default_value="info",
-                              description="move_group log level"),
+                              description="move_group 日志级别"),
         DeclareLaunchArgument("ros_domain_id", default_value="42",
-                              description="ROS domain used by this stack (the default deliberately "
-                                          "avoids 0). Set it to 0 to interoperate with external systems"),
+                              description="本栈使用的 ROS 域（默认刻意避开 0）。"
+                                          "要与外部系统对接时设 0"),
         DeclareLaunchArgument("ros_localhost_only", default_value="true",
-                              description="true = local discovery only. Cross-machine crosstalk makes "
-                                          "RViz show someone else's robot and puts multiple "
-                                          "servers on /move_action"),
+                              description="true = 只在本机发现。跨机串扰会让 RViz "
+                                          "显示别人的机器人、/move_action 出现多个 server"),
     ]
 
 
@@ -148,9 +128,8 @@ def _launch_setup(context, *_args, **_kwargs):
     moveit_share = get_package_share_directory("litearm_moveit_config")
     control_share = get_package_share_directory("litearm_ros2_control")
 
-    # shm_name must match the control stack: the MoveIt side has to inject it
-    # when expanding the URDF as well, otherwise the robot_description move_group
-    # gets does not match the hardware plugin parameters actually loaded.
+    # shm_name 必须与控制栈一致：MoveIt 侧展开 URDF 时同样要注入，
+    # 否则 move_group 拿到的 robot_description 与真正加载的硬件插件参数不符。
     moveit_config = (
         MoveItConfigsBuilder("litearm", package_name="litearm_moveit_config")
         .robot_description(mappings={"litearm_shm_name": shm_name})
@@ -174,10 +153,9 @@ def _launch_setup(context, *_args, **_kwargs):
                 "inertia_compensation": inertia_compensation,
                 "integral_compensation": integral_compensation,
                 "damping_compensation": damping_compensation,
-                "use_rviz": "false",  # either the control stack's own RViz or the MoveIt RViz below
-                # The isolation parameters must be forwarded: the included
-                # processes have to land in the same domain, otherwise move_group
-                # cannot see controller_manager's actions at all.
+                "use_rviz": "false",  # 控制栈自带的 RViz 与下面的 MoveIt RViz 二选一
+                # 隔离参数必须转发：被 include 的进程要落在同一个域里，
+                # 否则 move_group 根本看不到 controller_manager 的 action。
                 "ros_domain_id": domain_id,
                 "ros_localhost_only": localhost_only,
             }.items(),
@@ -193,24 +171,20 @@ def _launch_setup(context, *_args, **_kwargs):
     ))
 
     if use_rviz:
-        # Whether RViz starts is decided only by the Python check above; do
-        # **not** add a runtime IfCondition(LaunchConfiguration("use_rviz")):
-        # ROS 2 launch implements the launch_arguments of an
-        # IncludeLaunchDescription as SetLaunchConfiguration, which writes into
-        # the shared context — the control stack include above explicitly passes
-        # use_rviz:=false ("either the control stack RViz or the MoveIt RViz"),
-        # which overwrites this function's use_rviz configuration as false, so
-        # the runtime condition becomes permanently false and RViz is silently
-        # skipped (we hit this in this project: the launch log did not even show
-        # an rviz2 process).
+        # 是否起 RViz 只用上面这个 Python 判断，**不要**再加运行时
+        # IfCondition(LaunchConfiguration("use_rviz"))：ROS 2 launch 把
+        # IncludeLaunchDescription 的 launch_arguments 实现为
+        # SetLaunchConfiguration，写入的是共享上下文 —— 上面控制栈的 include
+        # 显式传了 use_rviz:=false（"控制栈 RViz 与 MoveIt RViz 二选一"），
+        # 会把本函数的 use_rviz 配置覆盖成 false，运行时条件随之恒假，
+        # RViz 被静默跳过（本工程踩过：launch 日志里连 rviz2 进程都没有）。
         actions.append(Node(
             package="rviz2",
             executable="rviz2",
             arguments=["-d", os.path.join(moveit_share, "rviz", "moveit.rviz")],
             output="log",
             additional_env=env,
-            # The MoveIt RViz plugin needs these parameter sets itself; it
-            # cannot just rely on move_group.
+            # RViz 的 MoveIt 插件要自己拿到这几组参数，不能只依赖 move_group。
             parameters=[
                 moveit_config.robot_description,
                 moveit_config.robot_description_semantic,
@@ -220,13 +194,13 @@ def _launch_setup(context, *_args, **_kwargs):
             ],
         ))
 
-    banner_target = ("dry-run (fake firmware on a pty)" if _is_true(dry_run)
-                     else f"real robot, port={port or '(auto-detect)'}")
+    banner_target = ("dry-run（pty 假固件）" if _is_true(dry_run)
+                     else f"真机，端口={port or '(自动发现)'}")
     actions.insert(0, LogInfo(msg=(
         "──────── litearm MoveIt ────────\n"
         f"  {banner_target}\n"
-        "  ⚠ This launch pins the ROS domain; to use the ros2 CLI in a terminal\n"
-        "    or look at RViz data, first run this in your own terminal:\n"
+        "  ⚠ 本 launch 已锁 ROS 域；想在终端里用 ros2 命令行 / 看 RViz 数据，\n"
+        "    请先在你自己的终端里执行：\n"
         f"        {isolation_hint(domain_id, localhost_only)}\n"
         "────────────────────────────────")))
     return actions

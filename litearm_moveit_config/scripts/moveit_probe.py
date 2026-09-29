@@ -1,30 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""moveit_probe.py — acceptance probe for the MoveIt planning pipeline.
+"""moveit_probe.py — MoveIt 规划链路验收探针。
 
-Verifies against an already running move_group:
+在已启动的 move_group 上验证：
 
-  1. move_group is up and knows the litearm_arm planning group
-  2. it can plan to the given joint goal (OMPL + KDL + the SRDF collision
-     matrix all in effect)
-  3. the planned trajectory has sensible joint names/point count/final point
-  4. optionally: hand the plan to joint_trajectory_controller for real execution
+  1. move_group 起来了，且认识 litearm_arm 这个规划组
+  2. 能规划到指定关节目标（OMPL + KDL + SRDF 碰撞矩阵全部生效）
+  3. 规划出的轨迹关节名/点数/终点合理
+  4. 可选：把规划结果交给 joint_trajectory_controller 真正执行
 
-Why /plan_kinematic_path is the default, not the MoveGroup action
+为什么默认走 /plan_kinematic_path 服务而不是 MoveGroup action
 ------------------------------------------------------------
-With planning_options.plan_only=true the MoveGroup action does not fill in the
-planned_trajectory of its result (the behaviour of Humble MoveIt2), so there is
-no planning result to verify. /plan_kinematic_path
-(moveit_msgs/srv/GetMotionPlan), by contrast, is purely "plan and return" —
-unambiguous semantics, no execution involved, which makes it the best fit for an
-acceptance test.
+MoveGroup action 在 planning_options.plan_only=true 时不会填充 result 里的
+planned_trajectory（Humble 版 MoveIt2 的行为），拿不到规划结果做校验。
+/plan_kinematic_path（moveit_msgs/srv/GetMotionPlan）则是纯粹的"规划并返回"，
+语义明确、不涉及执行，最适合做验收。
 
-Real execution just needs --execute; only then does it go through /move_action.
+真执行只需加 --execute，那时才走 /move_action。
 
-Usage:
+用法：
   ros2 launch litearm_moveit_config litearm_moveit.launch.py dry_run:=true &
-  python3 moveit_probe.py                # plan only (safe)
-  python3 moveit_probe.py --execute      # plan and execute (drives the arm)
+  python3 moveit_probe.py                # 只规划（安全）
+  python3 moveit_probe.py --execute      # 规划并执行（会驱动机械臂）
 """
 
 import argparse
@@ -41,10 +38,8 @@ from sensor_msgs.msg import JointState
 
 JOINTS = [f"joint{i}" for i in range(1, 8)]
 GROUP = "litearm_arm"
-# The goal configuration matches the SRDF ready state. The all-zero pose is not
-# used because it sits near a singularity, where KDL inverse kinematics and OMPL
-# sampling both struggle more; the higher failure rate there would mask genuine
-# problems.
+# 目标位形与 SRDF 的 ready 状态一致。不用全零位是因为它在奇异附近，
+# KDL 求逆与 OMPL 采样在那一带都更吃力，失败率偏高会掩盖真正的问题。
 GOAL = [0.0, -0.6, 1.1, -0.9, 0.0, 0.7, 0.0]
 TOLERANCE_RAD = 0.05
 
@@ -52,11 +47,9 @@ TOLERANCE_RAD = 0.05
 def _build_request() -> MotionPlanRequest:
     request = MotionPlanRequest()
     request.group_name = GROUP
-    # Specify the pipeline and planner explicitly: this does not depend on how
-    # default_planning_pipeline resolves, and so sidesteps the trap where
-    # "configuring only the plural planning_plugins degrades to CHOMP"
-    # (an unconfigured CHOMP shows up as "succeeds but returns an empty
-    # trajectory", which is very hard to pin down).
+    # 显式指定流水线与规划器：不依赖 default_planning_pipeline 的解析结果，
+    # 也就绕开了「只配 planning_plugins 复数时退化成 CHOMP」那个坑
+    # （CHOMP 未配置时的表现是"成功但返回空轨迹"，很难定位）。
     request.pipeline_id = "ompl"
     request.planner_id = "RRTConnectkConfigDefault"
     request.num_planning_attempts = 5
@@ -73,8 +66,7 @@ def _build_request() -> MotionPlanRequest:
     request.workspace_parameters.max_corner.y = 1.0
     request.workspace_parameters.max_corner.z = 1.0
 
-    # start state is_diff=True + empty content → move_group uses the state of
-    # the current planning scene
+    # 起始状态 is_diff=True + 空内容 → move_group 用当前规划场景的状态
     request.start_state = RobotState()
     request.start_state.is_diff = True
 
@@ -93,25 +85,25 @@ def _build_request() -> MotionPlanRequest:
 
 def _check_trajectory(node, joint_trajectory) -> int:
     if len(joint_trajectory.points) == 0:
-        print("✗ planning returned an empty trajectory")
+        print("✗ 规划返回了空轨迹")
         return 1
     names = list(joint_trajectory.joint_names)
-    print(f"  trajectory joints: {names}")
-    print(f"  trajectory points: {len(joint_trajectory.points)}")
+    print(f"  轨迹关节: {names}")
+    print(f"  轨迹点数: {len(joint_trajectory.points)}")
     if sorted(names) != sorted(JOINTS):
-        print(f"✗ trajectory joint set does not match the expectation (expected {JOINTS})")
+        print(f"✗ 轨迹关节集与预期不符（期望 {JOINTS}）")
         return 1
     last = list(joint_trajectory.points[-1].positions)
     order = [names.index(j) for j in JOINTS]
     last = [last[i] for i in order]
     worst = max(abs(last[i] - GOAL[i]) for i in range(7))
-    print(f"  final point:       {[round(v, 4) for v in last]}")
-    print(f"  goal:              {[round(v, 4) for v in GOAL]}")
-    print(f"  final error:       {worst:.4e} rad (tolerance {TOLERANCE_RAD})")
+    print(f"  终点:     {[round(v, 4) for v in last]}")
+    print(f"  目标:     {[round(v, 4) for v in GOAL]}")
+    print(f"  终点误差: {worst:.4e} rad（容差 {TOLERANCE_RAD}）")
     duration = joint_trajectory.points[-1].time_from_start
-    print(f"  trajectory time:   {duration.sec + duration.nanosec * 1e-9:.3f}s")
+    print(f"  轨迹时长: {duration.sec + duration.nanosec * 1e-9:.3f}s")
     if worst > TOLERANCE_RAD:
-        print("✗ planning final point is not within the goal tolerance")
+        print("✗ 规划终点未落在目标容差内")
         return 1
     return 0
 
@@ -119,7 +111,7 @@ def _check_trajectory(node, joint_trajectory) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--execute", action="store_true",
-                        help="actually execute the plan (drives the arm; make sure the space is clear first)")
+                        help="规划后真正执行（会驱动机械臂，请先确认空间开阔）")
     args = parser.parse_args()
 
     rclpy.init()
@@ -127,26 +119,26 @@ def main() -> int:
     request = _build_request()
 
     if not args.execute:
-        # ── plan only: go through the GetMotionPlan service ──
+        # ── 仅规划：走 GetMotionPlan 服务 ──
         client = node.create_client(GetMotionPlan, "/plan_kinematic_path")
-        print("waiting for /plan_kinematic_path …")
+        print("等待 /plan_kinematic_path …")
         if not client.wait_for_service(timeout_sec=40.0):
-            print("✗ /plan_kinematic_path unavailable (move_group not ready?)")
+            print("✗ /plan_kinematic_path 不可用（move_group 未就绪？）")
             return 1
-        print("✓ move_group ready")
+        print("✓ move_group 就绪")
 
         future = client.call_async(GetMotionPlan.Request(motion_plan_request=request))
         rclpy.spin_until_future_complete(node, future, timeout_sec=60)
         response = future.result()
         if response is None:
-            print("✗ planning service did not return within the timeout")
+            print("✗ 规划服务未在超时内返回")
             return 1
         code = response.motion_plan_response.error_code.val
-        print(f"✓ planning done: error_code={code} "
+        print(f"✓ 规划完成: error_code={code} "
               f"({'SUCCESS' if code == 1 else 'FAILURE'}), "
-              f"took {response.motion_plan_response.planning_time:.3f}s")
+              f"耗时 {response.motion_plan_response.planning_time:.3f}s")
         if code != 1:
-            print("✗ planning failed")
+            print("✗ 规划失败")
             return 1
         rc = _check_trajectory(
             node, response.motion_plan_response.trajectory.joint_trajectory)
@@ -154,19 +146,16 @@ def main() -> int:
         rclpy.shutdown()
         if rc != 0:
             return rc
-        print("\n✓ MoveIt planning pipeline acceptance passed "
-              "(nothing executed, the arm did not move)")
+        print("\n✓ MoveIt 规划链路验收通过（未执行，机械臂未运动）")
         return 0
 
-    # ── plan and execute: go through the MoveGroup action ──
+    # ── 规划并执行：走 MoveGroup action ──
     #
-    # The acceptance criterion is [/joint_states actually converging to the
-    # goal], not the MoveGroup return code. The reason: move_group's MoveAction
-    # spawns sub-goals while executing, and rclpy's ActionClient occasionally
-    # reports "Ignoring unexpected goal response" (a goal response arriving with
-    # a sequence number that is not the current one), and the result obtained
-    # then may not reflect the real execution outcome. Joint angles are physical
-    # facts, more trustworthy than a return code.
+    # 验收判据是【/joint_states 是否真的收敛到目标】，而不是 MoveGroup 的
+    # 返回码。原因：move_group 的 MoveAction 在执行期间会派生子 goal，rclpy 的
+    # ActionClient 偶发会报 "Ignoring unexpected goal response"（收到非当前
+    # 序号的目标响应），此时拿到的 result 可能不反映真实执行结果。关节角是
+    # 物理事实，比返回码可信。
     live: dict = {}
 
     def on_joint_state(msg):
@@ -177,17 +166,17 @@ def main() -> int:
     for _ in range(40):
         rclpy.spin_once(node, timeout_sec=0.05)
     if len(live) >= 7:
-        print(f"  start position: {[round(live.get(j, float('nan')), 4) for j in JOINTS]}")
+        print(f"  起始位置: {[round(live.get(j, float('nan')), 4) for j in JOINTS]}")
     else:
-        print(f"✗ /joint_states did not provide 7 joints (got {sorted(live)})")
+        print(f"✗ /joint_states 未给出 7 个关节（收到 {sorted(live)}）")
         return 1
 
     client = ActionClient(node, MoveGroup, "/move_action")
-    print("waiting for /move_action …")
+    print("等待 /move_action …")
     if not client.wait_for_server(timeout_sec=40.0):
-        print("✗ /move_action unavailable (move_group not ready?)")
+        print("✗ /move_action 不可用（move_group 未就绪？）")
         return 1
-    print("✓ move_group ready")
+    print("✓ move_group 就绪")
 
     goal = MoveGroup.Goal()
     goal.request = request
@@ -199,40 +188,37 @@ def main() -> int:
     rclpy.spin_until_future_complete(node, future, timeout_sec=20)
     handle = future.result()
     if handle is None or not handle.accepted:
-        print("✗ planning request was rejected")
+        print("✗ 规划请求被拒绝")
         return 1
-    print("✓ request accepted, planning and executing …")
+    print("✓ 请求已接受，规划并执行中 …")
 
     result_future = handle.get_result_async()
     rclpy.spin_until_future_complete(node, result_future, timeout_sec=120)
     wrapped = result_future.result()
     if wrapped is not None:
         code = wrapped.result.error_code.val
-        print(f"  MoveGroup return code: {code} "
-              f"({'SUCCESS' if code == 1 else 'FAILURE/other'})")
+        print(f"  MoveGroup 返回码: {code} "
+              f"({'SUCCESS' if code == 1 else 'FAILURE/其他'})")
     else:
-        print("  MoveGroup did not return a result within the timeout "
-              "(continuing with the joint-angle check)")
+        print("  MoveGroup 未在超时内返回结果（继续按关节角判定）")
 
-    # The trajectory is on the order of 3 s; give it a few more seconds for
-    # tracking to converge
+    # 轨迹时长 3s 量级，再多给几秒让跟踪收敛
     for _ in range(120):
         rclpy.spin_once(node, timeout_sec=0.05)
 
     worst = 0.0
     for index, name in enumerate(JOINTS):
         worst = max(worst, abs(live.get(name, 99.0) - GOAL[index]))
-    print(f"  measured position: {[round(live.get(j, float('nan')), 4) for j in JOINTS]}")
-    print(f"  goal position:     {[round(v, 4) for v in GOAL]}")
-    print(f"  max error:         {worst:.4e} rad (tolerance {TOLERANCE_RAD})")
+    print(f"  实测位置: {[round(live.get(j, float('nan')), 4) for j in JOINTS]}")
+    print(f"  目标位置: {[round(v, 4) for v in GOAL]}")
+    print(f"  最大误差: {worst:.4e} rad（容差 {TOLERANCE_RAD}）")
 
     node.destroy_node()
     rclpy.shutdown()
     if worst >= TOLERANCE_RAD:
-        print("✗ joint angles did not converge to the goal after execution")
+        print("✗ 执行后关节角未收敛到目标")
         return 1
-    print("\n✓ MoveIt planning + execution pipeline acceptance passed "
-          "(joint angles converged to the goal)")
+    print("\n✓ MoveIt 规划 + 执行链路验收通过（关节角已收敛到目标）")
     return 0
 
 

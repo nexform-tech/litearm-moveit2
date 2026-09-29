@@ -2,11 +2,8 @@
 
 MoveIt 2 integration on ROS 2 for the **LiteArm robotic manipulator series**.
 
-## Packages
-
-| Package | Type | Role |
-| --- | --- | --- |
-| `litearm_moveit_config` | ament_cmake | MoveIt 2 configuration for the LiteArm 7-axis arm: SRDF, joint limits, kinematics, OMPL and Pilz planning pipelines, MoveIt controllers and an RViz layout |
+> **Status:** the `litearm_moveit_config` package has landed. Package tests and
+> CI coverage for it are still to come.
 
 ## Scope
 
@@ -14,7 +11,13 @@ MoveIt 2 integration on ROS 2 for the **LiteArm robotic manipulator series**.
 | --- | --- |
 | Product | LiteArm robotic manipulator series |
 | Repository role | MoveIt 2 integration on ROS 2 |
-| Status | Active — MoveIt 2 configuration package landed |
+| Status | Active — `litearm_moveit_config` available |
+
+## Packages
+
+| Package | Role |
+| --- | --- |
+| `litearm_moveit_config` | MoveIt 2 configuration for the litearm seven-axis arm: SRDF and collision matrix, KDL kinematics, joint limits derived from the firmware parameter table, OMPL and Pilz planning pipelines, `moveit_controllers`, RViz layout and launch files |
 
 ## Related repositories
 

@@ -1,30 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""demo.launch.py — MoveIt demo that does not touch real hardware.
+"""demo.launch.py — 不接真实硬件的 MoveIt 演示。
 
-Brings up the MoveIt panel with a single command: drag the goal configuration
-with the mouse in RViz, click Plan & Execute, and watch the arm actually "move":
+一条命令起 MoveIt 面板，在 RViz 里用鼠标拖目标位形、点 Plan & Execute
+看机械臂真的"动"起来：
 
     ros2 launch litearm_moveit_config demo.launch.py
 
-In essence this is litearm_moveit.launch.py with dry_run hard-pinned to true.
-The reason for a separate entry point is the same as for litearm_demo.launch.py:
-**splitting "demo" and "real robot" into two commands** means there is no way to
-mix up a parameter and bring up the real arm by mistake.
+本质上就是把 litearm_moveit.launch.py 的 dry_run 硬钉为 true。
+单独做一个入口的理由和 litearm_demo.launch.py 一样：**把"演示"和"真机"分成
+两个命令**，就不存在看错参数把真臂开起来这种事。
 
-For the real robot use:
+真机请用：
     ros2 launch litearm_moveit_config litearm_moveit.launch.py
-(board powered, USB connected, license activated, and make sure the arm is
-supported and the emergency stop is within reach)
+（板子已上电、USB 已连、license 已激活，并确认机械臂已支撑、急停可触达）
 
-Named states available in RViz (SRDF group_state):
+RViz 里可用的命名状态（SRDF 的 group_state）：
 
-    zero    all joints at zero
-    ready   stretched-out configuration with the elbow raised; a better
-            planning start than zero (zero is near a singularity, where
-            Cartesian planning tends to fail)
+    zero    全零位
+    ready   肘部抬起的舒展构型，比零位更适合作为规划起点
+            （零位在奇异附近，笛卡尔规划容易失败）
 
-In a headless environment add use_rviz:=false and verify from the command line:
+无显示环境请加 use_rviz:=false，改用命令行验证：
     ros2_ws/src/litearm_moveit_config/scripts/acceptance_moveit.sh --execute
 """
 
@@ -39,13 +36,13 @@ from launch.substitutions import LaunchConfiguration
 def _declare_arguments():
     return [
         DeclareLaunchArgument("use_rviz", default_value="true",
-                              description="whether to start RViz2 (the MoveIt motion planning panel)"),
+                              description="是否启动 RViz2（MoveIt 运动规划面板）"),
         DeclareLaunchArgument("shm_name", default_value="/litearm_hw",
-                              description="shared memory segment name (no need to change for the demo)"),
+                              description="共享内存段名（演示不必改）"),
         DeclareLaunchArgument("ros_domain_id", default_value="42",
-                              description="ROS domain used by this demo (default deliberately avoids 0)"),
+                              description="本演示使用的 ROS 域（默认刻意避开 0）"),
         DeclareLaunchArgument("ros_localhost_only", default_value="true",
-                              description="true = local discovery only, avoids cross-machine crosstalk"),
+                              description="true = 只在本机发现，避免跨机串扰"),
     ]
 
 
@@ -55,8 +52,7 @@ def _launch_setup(context, *_args, **_kwargs):
         PythonLaunchDescriptionSource(
             get_package_share_directory("litearm_moveit_config") + "/launch/litearm_moveit.launch.py"),
         launch_arguments={
-            # Hard-pinned: this entry point is always simulated (fake firmware
-            # on a pty) and never touches real hardware
+            # 硬钉：这个入口永远是模拟（pty 假固件），不会碰真硬件
             "dry_run": "true",
             "use_rviz": LaunchConfiguration("use_rviz"),
             "shm_name": resolve("shm_name"),
@@ -65,10 +61,10 @@ def _launch_setup(context, *_args, **_kwargs):
         }.items())
     return [
         LogInfo(msg=(
-            "──────── litearm MoveIt hardware-free demo ────────\n"
-            "  Mode: dry-run (daemon runs fake firmware on a pty; the link uses the real protocol)\n"
-            "  In RViz, drag a goal in the MotionPlanning panel → Plan & Execute\n"
-            "  For the real robot use: ros2 launch litearm_moveit_config litearm_moveit.launch.py\n"
+            "──────── litearm MoveIt 无硬件演示 ────────\n"
+            "  模式：dry-run（守护进程在 pty 上起假固件，链路走真实协议）\n"
+            "  RViz 里用 MotionPlanning 面板拖目标 → Plan & Execute\n"
+            "  真机请用：ros2 launch litearm_moveit_config litearm_moveit.launch.py\n"
             "──────────────────────────────────────────")),
         moveit_launch,
     ]
