@@ -1,0 +1,16 @@
+# Marker file for the MoveIt Setup Assistant.
+#
+# This configuration package is script-generated plus hand-written (the
+# collision matrix is computed from the real meshes by
+# tools/compute_collision_matrix.py); it never went through the setup
+# assistant's GUI wizard. This file is kept so that the package can be opened
+# and edited further with the setup assistant later on.
+#
+# Note: nothing reads this file at runtime (moveit_configs_utils / the RViz
+# MoveIt plugin both locate packages through ament_index). package_path is
+# metadata the setup assistant maintains itself; it is deliberately a relative
+# path (the directory containing this file is the package root) so that no
+# machine's absolute paths get baked in; opening and saving with the setup
+# assistant rewrites it for whatever machine it runs on.
+moveit_config:
+  package_path: .
