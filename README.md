@@ -385,10 +385,10 @@ Two notes on that list, both of which the package's own headers explain at
 length:
 
 - **The IK solver is KDL, MoveIt's default.** It ships with MoveIt, so the
-  workspace needs no extra package. KDL misses poses that exist — measured on this
-  arm, four seeds fail within 705 ms where SNS-IK solves them — so when planning
-  looks intermittent rather than geometric, switch to SNS-IK: the recipe, the
-  plugin-name trap and the measured hit rates are in `config/kinematics.yaml`.
+  workspace needs no extra package. KDL misses poses that exist — four seeds can
+  all fail within 705 ms where SNS-IK solves them — so when planning looks
+  intermittent rather than geometric, switch to SNS-IK: the recipe, the
+  plugin-name trap and the hit rates are in `config/kinematics.yaml`.
 - **The Pilz pipeline is not loaded.** The package plans with OMPL only.
   `config/pilz_cartesian_limits.yaml` is there so that enabling Pilz needs no new
   file.
