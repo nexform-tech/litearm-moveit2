@@ -4,20 +4,18 @@
   <name>litearm_moveit_config</name>
   <version>1.0.0</version>
   <description>
-    MoveIt2 configuration for the litearm 7-axis robot arm: SRDF, KDL
-    kinematics, joint limits, OMPL planning pipeline and move_group launch
-    files. Used together with the litearm_ros2_control adapter layer, it
-    provides motion planning and execution on the real robot.
+    litearm 七轴机械臂的 MoveIt2 配置：SRDF、KDL 运动学、关节限位、
+    OMPL 规划流水线与 move_group 启动文件。配合 litearm_ros2_control
+    适配层使用，可对真机做运动规划与执行。
   </description>
   <maintainer email="TODO@email.com">TODO</maintainer>
   <license>BSD-3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <!-- Kinematics and semantic description come from the control adapter layer
-       (which contains the upstream litearm description package) -->
+  <!-- 运动学与语义描述来自控制适配层（内含上游 litearm 描述包） -->
   <exec_depend>litearm_ros2_control</exec_depend>
-  <exec_depend>litearm</exec_depend>
+  <exec_depend>litearm_description</exec_depend>
 
   <exec_depend>moveit</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
@@ -35,8 +33,7 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
 
-  <!-- Runtime dependencies of tools/compute_collision_matrix.py (needed only
-       when regenerating the collision matrix) -->
+  <!-- tools/compute_collision_matrix.py 的运行时依赖（只在重新生成碰撞矩阵时需要） -->
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>
 

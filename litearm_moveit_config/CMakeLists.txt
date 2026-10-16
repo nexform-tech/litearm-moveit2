@@ -3,22 +3,20 @@ project(litearm_moveit_config)
 
 find_package(ament_cmake REQUIRED)
 
-# This package is pure configuration (SRDF / yaml / launch / rviz); it produces
-# no build artifacts.
+# 本包是纯配置包（SRDF / yaml / launch / rviz），不含编译产物。
 install(DIRECTORY config launch rviz
   DESTINATION share/${PROJECT_NAME}
 )
 
-# On-site acceptance probes (require a running move_group)
+# 现场验收探针（需要已启动的 move_group）
 install(PROGRAMS
   scripts/moveit_probe.py
   scripts/acceptance_moveit.sh
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# Tool scripts: collision matrix generation, deriving joint limits from the
-# firmware parameter tables. Installing them under lib/${PROJECT_NAME} is what
-# makes the invocation paths given in the messages valid.
+# 工具脚本：碰撞矩阵生成、从固件参数表派生关节限位。
+# 装到 lib/${PROJECT_NAME} 下，系统提示里给出的调用路径才是有效的。
 install(PROGRAMS
   tools/compute_collision_matrix.py
   tools/gen_from_firmware_config.py

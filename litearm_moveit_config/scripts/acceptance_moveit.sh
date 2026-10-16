@@ -1,32 +1,26 @@
 #!/usr/bin/env bash
-# acceptance_moveit.sh — MoveIt planning pipeline acceptance test (no hardware).
+# acceptance_moveit.sh — MoveIt 规划链路验收（无硬件）。
 #
-#   start move_group (control stack in dry-run) → plan to the ready pose →
-#   optionally execute → tear the stack down
+#   起 move_group（--real 时另起直连 USB 的控制栈）→ 规划到 ready 位形
+#   → 可选执行 → 收栈
 #
-# Usage:
-#   scripts/acceptance_moveit.sh                # plan only (does not drive the arm)
-#   scripts/acceptance_moveit.sh --execute      # plan and execute
-#   scripts/acceptance_moveit.sh --execute --real   # real robot
+# 用法:
+#   scripts/acceptance_moveit.sh                    # 只规划（不接硬件、不起控制栈）
+#   scripts/acceptance_moveit.sh --execute --real   # 真机：起控制栈并执行
 #
-# Environment caveat (a pitfall we hit): the ROS 2 default domain is 0 and
-# multicast discovery is network-wide. If other robots on the same subnet are
-# running ROS 2, you will see **multiple /move_action servers**, and the
-# planning goal may be taken over by a stranger node's move_group — it does not
-# have your controllers, so it returns FAILURE; meanwhile your own move_group is
-# executing as well, which shows up as "it reports failure but the arm really
-# did move" — an extremely hard symptom to track down.
-# So this script forces a dedicated domain ID + localhost only.
+# 环境注意（踩过的坑）：ROS 2 默认域 0 且组播发现是全网的。同网段若有其他机器人
+# 在跑 ROS 2，会看到**多个 /move_action server**，规划目标可能被陌生节点的
+# move_group 接管 —— 它没有你的控制器，于是返回 FAILURE；而你的 move_group
+# 同时也在执行，表现为"报失败但臂确实动了"这种极难定位的现象。
+# 所以这里强制用独立域名 + 只走本机。
 
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Workspace root: the script may run from the source tree
-# (<ws>/src/<pkg>/scripts/) or from the install tree
-# (<ws>/install/<pkg>/lib/<pkg>/), which sit at different depths. So walk up
-# looking for a directory that holds both src/ and install/, instead of
-# deducing it from a fixed number of levels.
+# 工作区根：脚本可能从源码树（<ws>/src/<pkg>/scripts/）运行，也可能从安装树
+# （<ws>/install/<pkg>/lib/<pkg>/）运行，两种深度不同。这里向上找同时含
+# src/ 与 install/ 的目录，而不是靠固定层数推算。
 _find_ws() {
     local d="$SCRIPT_DIR"
     while [ "$d" != "/" ]; do
@@ -40,7 +34,7 @@ _find_ws() {
 }
 
 if ! WS_DIR="$(_find_ws)"; then
-    echo "cannot find the workspace root (needs both src/ and install/setup.bash): $SCRIPT_DIR" >&2
+    echo "找不到工作区根（需要同时存在 src/ 与 install/setup.bash）：$SCRIPT_DIR" >&2
     exit 2
 fi
 
@@ -52,9 +46,8 @@ PROBE="$SCRIPT_DIR/moveit_probe.py"
 
 cd "$WS_DIR"
 set +u
-# ROS environment: do not hard-code the distro; locate the install prefix via
-# $ROS_DISTRO, falling back to humble. If you have already sourced another
-# distro, export ROS_DISTRO explicitly before running this script.
+# ROS 环境：不写死发行版，用 $ROS_DISTRO 或默认 humble 定位安装前缀。
+# 若已 source 过其他发行版，请显式导出 ROS_DISTRO 再运行本脚本。
 # shellcheck disable=SC1091
 source "/opt/ros/${ROS_DISTRO:-humble}/setup.bash"
 # shellcheck disable=SC1091
@@ -62,21 +55,29 @@ source install/setup.bash
 set -u
 
 PROBE_ARGS=()
-DRY="dry_run:=true"
+# 本部署是直连 USB 的，没有 dry-run 硬件：默认只起 MoveIt（start_control:=false），
+# 只有 --real 才把控制栈一起起起来，也才允许执行。
+CTRL="start_control:=false"
+WANT_EXECUTE=0
 for arg in "$@"; do
     case "$arg" in
-        --execute) PROBE_ARGS+=("--execute") ;;
-        --real)    DRY="dry_run:=false"
-                   echo "[accept] ★ real-robot mode: the arm really moves — clear the space, hold the emergency stop" ;;
-        *) echo "unknown argument: $arg" >&2; exit 2 ;;
+        --execute) WANT_EXECUTE=1
+                   PROBE_ARGS+=("--execute") ;;
+        --real)    CTRL="start_control:=true"
+                   echo "[accept] ★ 真机模式：机械臂将实际运动，确认空间开阔、已扶好急停" ;;
+        *) echo "未知参数: $arg" >&2; exit 2 ;;
     esac
 done
+if [ "$WANT_EXECUTE" = 1 ] && [ "$CTRL" = "start_control:=false" ]; then
+    echo "[accept] --execute 需要控制栈：请加 --real（本部署没有 dry-run 硬件）" >&2
+    exit 2
+fi
 
 rm -f "$LOG"
 setsid ros2 launch litearm_moveit_config litearm_moveit.launch.py \
-    "$DRY" use_rviz:=false >"$LOG" 2>&1 </dev/null &
+    "$CTRL" use_rviz:=false >"$LOG" 2>&1 </dev/null &
 LAUNCH_PID=$!
-echo "[accept] MoveIt stack started pid=$LAUNCH_PID domain=$ROS_DOMAIN_ID log=$LOG"
+echo "[accept] MoveIt 栈已启动 pid=$LAUNCH_PID domain=$ROS_DOMAIN_ID log=$LOG"
 
 cleanup() {
     local pgid
@@ -87,25 +88,25 @@ cleanup() {
         kill -KILL -"$pgid" 2>/dev/null
     fi
     wait "$LAUNCH_PID" 2>/dev/null
-    echo "[accept] stack torn down"
+    echo "[accept] 已收栈"
 }
 trap cleanup EXIT
 
 deadline=$((SECONDS + 120))
 while (( SECONDS < deadline )); do
     if grep -q "You can start planning now" "$LOG" 2>/dev/null; then
-        echo "[accept] move_group ready"
+        echo "[accept] move_group 就绪"
         break
     fi
     if grep -qiE "\[FATAL\]|Failed to load|error loading" "$LOG" 2>/dev/null; then
-        echo "[accept] move_group failed to start:"
+        echo "[accept] move_group 启动失败："
         grep -iE "\[FATAL\]|Failed to load|error" "$LOG" | head -20
         exit 1
     fi
     sleep 1
 done
 if ! grep -q "You can start planning now" "$LOG" 2>/dev/null; then
-    echo "[accept] timed out waiting for readiness, tail of the log:"
+    echo "[accept] 超时未就绪，日志尾部："
     tail -40 "$LOG"
     exit 1
 fi
@@ -113,9 +114,8 @@ fi
 python3 "$PROBE" ${PROBE_ARGS[@]+"${PROBE_ARGS[@]}"}
 RC=$?
 
-echo "[accept] ===== problems found in the log ====="
-# The octomap line is MoveIt's standard warning when there is no 3D sensor; this
-# configuration has no depth camera, so it is expected
-grep -iE "\[ERROR\]|\[FATAL\]" "$LOG" | grep -v "occupancy_map_monitor" | head -10 || echo "(none)"
-echo "[accept] probe exit code=$RC"
+echo "[accept] ===== 日志中的问题项 ====="
+# octomap 那条是 MoveIt 在没有 3D 传感器时的固定告警，本配置无深度相机，属预期
+grep -iE "\[ERROR\]|\[FATAL\]" "$LOG" | grep -v "occupancy_map_monitor" | head -10 || echo "（无）"
+echo "[accept] 探针退出码=$RC"
 exit $RC
