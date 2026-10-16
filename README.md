@@ -67,10 +67,6 @@ this package launches is a thin wrapper that includes
 `$(find litearm_ros2_control)/urdf/litearm.urdf.xacro`. Without that package the
 description does not resolve and RViz loads an empty robot.
 
-**Do not add the firmware repository to the same workspace.** `litearm-stm32`
-ships its own `litearm` URDF package, and two arm descriptions in one workspace
-make it ambiguous which one a launch resolves.
-
 ## Quickstart with Docker
 
 ### 1. Build the run image

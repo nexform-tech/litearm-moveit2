@@ -63,9 +63,6 @@
 瘦包装，它 include 的是 `$(find litearm_ros2_control)/urdf/litearm.urdf.xacro`。
 没有那个包，描述解析不出来，RViz 会加载出一个空机器人。
 
-**不要把固件仓库放进同一个工作区。** `litearm-stm32` 自带一个 `litearm` URDF 包，
-同一个工作区里有两份机械臂描述，launch 到底解析哪一份是含糊的。
-
 ## 用容器快速上手
 
 ### 1. 构建运行镜像
