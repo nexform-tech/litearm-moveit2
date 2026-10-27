@@ -396,7 +396,7 @@ export ROS_DOMAIN_ID=42; export ROS_LOCALHOST_ONLY=1
 
 ## 仓库规范
 
-本仓库遵循 NEXFORM ROBOTICS 的共享仓库规范：[AGENTS.md](AGENTS.md) 里的代理作业规则、
+本仓库遵循 NEXFORM ROBOTICS 的共享仓库规范：[`.nexform-standards.json`](.nexform-standards.json) 里的代理作业规则、
 Conventional Commits，以及每次合入 `main` 时自动执行的 semantic-release 版本管理。
 
 ## 许可证
