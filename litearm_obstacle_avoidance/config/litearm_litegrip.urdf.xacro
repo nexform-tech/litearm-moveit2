@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!--
+  litearm_litegrip.urdf.xacro — 真机组合描述入口（机械臂 + LiteGrip 夹爪）。
+
+  几何、安装变换与全部说明都在 litearm_litegrip.geometry.urdf.xacro；
+  本文件只追加 litearm_ros2_control 的直连 USB <ros2_control> 声明：
+
+      xacro litearm_litegrip.urdf.xacro  ->  臂几何 + 夹爪几何 + LitearmSystem
+
+  干跑（无硬件）用 litearm_litegrip_fake.urdf.xacro，它把同一个几何文件
+  接到 mock_components/GenericSystem 上。
+
+  ⚠ 夹爪安装位姿是临时值、夹爪没有状态来源：见 geometry 文件头的「安装位姿」
+    与「已知限制」。真机使用前必须标定。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="litearm">
+  <xacro:include filename="litearm_litegrip.geometry.urdf.xacro"/>
+  <xacro:include filename="$(find litearm_ros2_control)/urdf/litearm.ros2_control.xacro"/>
+</robot>

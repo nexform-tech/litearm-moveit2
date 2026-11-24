@@ -1,0 +1,104 @@
+<?xml version="1.0"?>
+<!--
+  obstacle_avoidance.world — 阶段 1~4 的 Gazebo Classic 测试工位。
+
+  坐标系与 config/scene.yaml 对齐：
+    · 机器人 base_link 在 (0,0,0)，spawn 时 z=0；
+    · 工作台顶面 z=-0.02，台面尺寸 0.90 × 0.90；
+    · 夹具体、方块与 scene.yaml 的 fixture_pillar / fixture_block 位姿一致；
+    · 地面在 z=-0.12，桌子落在上面。
+
+  Gazebo 的世界几何只用于物理/可视化；MoveIt 的碰撞环境来自 scene_builder
+  写进 PlanningScene 的同一份 scene.yaml。两者必须保持一致，否则会出现
+  “Gazebo 里有、规划里没有”（或反过来）的情况。
+-->
+<sdf version="1.6">
+  <world name="litearm_obstacle_avoidance">
+
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <pose>0 0 -0.12 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>20 20</size></plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>20 20</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>0.6 0.6 0.6 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="workbench">
+      <static>true</static>
+      <pose>0.10 0 -0.07 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.90 0.90 0.10</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.90 0.90 0.10</size></box></geometry>
+          <material>
+            <ambient>0.55 0.4 0.28 1</ambient>
+            <diffuse>0.65 0.48 0.32 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="fixture_pillar">
+      <static>true</static>
+      <pose>0.30 -0.25 0.12 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><cylinder><radius>0.04</radius><length>0.28</length></cylinder></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.04</radius><length>0.28</length></cylinder></geometry>
+          <material>
+            <ambient>0.2 0.35 0.5 1</ambient>
+            <diffuse>0.25 0.45 0.65 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="fixture_block">
+      <static>true</static>
+      <pose>-0.30 0.15 0.04 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.12 0.12 0.12</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.12 0.12 0.12</size></box></geometry>
+          <material>
+            <ambient>0.3 0.45 0.3 1</ambient>
+            <diffuse>0.35 0.55 0.35 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

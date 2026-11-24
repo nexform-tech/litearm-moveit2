@@ -1,0 +1,139 @@
+<?xml version="1.0"?>
+<!--
+  litearm_litegrip.geometry.urdf.xacro — 机械臂 + LiteGrip 夹爪的几何组合。
+
+  只含几何与关节，不含任何 <ros2_control> 声明。两个上层文件在它之上追加
+  不同的硬件块：
+
+      litearm_litegrip.urdf.xacro        真机：litearm_ros2_control 的直连 USB 组件
+      litearm_litegrip_fake.urdf.xacro   干跑：mock_components/GenericSystem
+
+  这样安装变换、link 前缀、夹爪模型只维护一份。
+
+  为什么需要组合
+  ==============
+  litearm_moveit_config 的模型只到 ee_link（工具法兰），没有末端执行器。
+  避障任务要求把夹爪本身也作为碰撞体参与规划，所以把两个产品包的模型
+  组合成一个机器人。夹爪通过一条 fixed joint 挂在 ee_link 上。
+
+  link 名统一加了 `litegrip_` 前缀：两边都有 `base_link`，不加前缀 URDF 会
+  因重名无法解析。joint 名保持不变，控制器/接口约定不受影响。
+
+  安装位姿
+  ========
+  参考 `litearm_full_20261124`（部署机器人复现模型）给出 ee_link -> gripper_base
+  = `xyz 0 0 0.0641, rpy 0 0 0`。但那个值对应的是**端盖仍装在臂上、夹爪叠在
+  端盖外表面**的构型；实机上要先拆掉端盖再装夹爪：
+
+      ee_link.STL（端盖）     z ∈ [-0.0103, 0]，直径 52.9 mm，厚 10.3 mm
+      litegrip 夹爪尾部       同直径 52.9 mm，凸台长也是 10.3 mm
+
+  拆掉端盖后，夹爪尾部凸台正好占据端盖原来的空间，尾端贴到端盖底面
+  z = -0.0103，因此安装偏移 = 0.0641 - 0.0103 = **0.0538 m**。
+
+  端盖几何在 litearm_description 里保留（单臂显示仍需要），组合模型里它被
+  夹爪尾部凸台完全包住，视觉上看不到；两者的碰撞对在 SRDF 里禁用。
+
+  如果你们的实物保留了端盖、用了转接板，或量出的距离不同，改这两个默认值
+  即可（launch 无需改动）：
+
+      xacro litearm_litegrip.geometry.urdf.xacro \
+        gripper_mount_xyz:="0 0 0.0538" gripper_mount_rpy:="0 0 0"
+
+  夹爪的 ros2_control
+  ===================
+  geometry 本身不输出夹爪的硬件块。真机文件不接夹爪驱动：mock 硬件会把
+  position 指令直接回读成状态、让上层看起来"夹取成功"，在真机上是危险的
+  假象。本任务里夹爪只作为碰撞几何存在。
+
+  夹爪碰撞包络（阶段 2）
+  ======================
+  没有夹爪状态来源时，MoveIt 把 gripper_opening_joint 当作 0（闭合位）；
+  物理夹爪若实际张开，指尖外缘约 ±4.3 cm 的范围不会被真实手指网格覆盖。
+  为此这里给每个手指加了**全行程保守包络**（include_gripper_envelope，
+  默认开）：
+
+      right: x ∈ [-0.068, -0.000774]，y ±0.0305，z ∈ [0.0205, 0.1125]
+      left : x ∈ [ 0.000774, 0.068 ]，同 y/z
+      再向外扩 gripper_envelope_margin（默认 0.01 m）
+
+  包络只有 collision、没有 visual，因此碰撞检查与夹爪当前开口无关，
+  闭合/张开两种状态都被覆盖。margin 向内扩会让两个包络在中间重叠，
+  包络互相之间、以及包络与真实手指/夹爪本体之间的碰撞对在 SRDF 中禁用
+  （它们要么刚性相连，要么是包含关系）。
+
+  做抓取规划时如需精确掌握区，可用 include_gripper_envelope:=false
+  关掉包络；此时 SRDF 里引用包络 link 的 disable_collisions 条目也要一并
+  删除，否则 MoveIt 会引用不存在的 link。
+
+  运动学约定
+  ==========
+  litearm_arm 规划组的链尾仍是 ee_link（与固件和既有配置一致）；夹爪的
+  两个手指是 mimic link，位置由 gripper_opening_joint 唯一决定。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="litearm">
+
+  <!-- 无真实夹爪时不要 mock 它的 ros2_control（理由见文件头） -->
+  <xacro:arg name="include_mock_ros2_control" default="false"/>
+  <!-- link 名前缀，避免与宿主模型的 base_link 重名 -->
+  <xacro:arg name="link_prefix" default="litegrip_"/>
+  <!-- 夹爪相对 ee_link 的安装位姿：拆掉 10.3 mm 端盖后，= 0.0641 - 0.0103 -->
+  <xacro:arg name="gripper_mount_xyz" default="0 0 0.0538"/>
+  <xacro:arg name="gripper_mount_rpy" default="0 0 0"/>
+  <!-- 手指全行程保守包络（见文件头）：关闭后只检查真实手指网格 -->
+  <xacro:arg name="include_gripper_envelope" default="true"/>
+  <!-- 包络在每个方向上外扩的量（m） -->
+  <xacro:arg name="gripper_envelope_margin" default="0.01"/>
+
+  <!-- xacro 的 ${} 表达式里取不到 arg，只能按属性引用 -->
+  <xacro:property name="gripper_prefix" value="$(arg link_prefix)"/>
+
+  <!-- 机械臂几何（litearm-description 包） -->
+  <xacro:include filename="$(find litearm_description)/urdf/litearm_description.urdf"/>
+  <!-- 夹爪几何（litegrip_description 支持 link_prefix） -->
+  <xacro:include filename="$(find litegrip_description)/urdf/litegrip_description.urdf.xacro"/>
+
+  <!-- 安装：ee_link -> 夹爪 base_footprint（litegrip 文档指定的附着基准） -->
+  <joint name="gripper_mount_joint" type="fixed">
+    <parent link="ee_link"/>
+    <child link="${gripper_prefix}base_footprint"/>
+    <origin xyz="$(arg gripper_mount_xyz)" rpy="$(arg gripper_mount_rpy)"/>
+  </joint>
+
+  <!-- 手指全行程保守包络（collision-only）。尺寸 = 从全闭到全开的扫掠体积
+       再各向外扩 margin；x 中心 ±0.034387，y 中心 0，z 中心 0.066483。 -->
+  <xacro:if value="$(arg include_gripper_envelope)">
+    <xacro:property name="env_margin" value="$(arg gripper_envelope_margin)"/>
+
+    <link name="${gripper_prefix}finger_envelope_r">
+      <collision>
+        <origin xyz="-0.034387 0 0.066483" rpy="0 0 0"/>
+        <geometry>
+          <box size="${0.067226 + 2.0 * float(env_margin)}
+                     ${0.061000 + 2.0 * float(env_margin)}
+                     ${0.092000 + 2.0 * float(env_margin)}"/>
+        </geometry>
+      </collision>
+    </link>
+    <joint name="${gripper_prefix}finger_envelope_r_joint" type="fixed">
+      <parent link="${gripper_prefix}base_link"/>
+      <child link="${gripper_prefix}finger_envelope_r"/>
+    </joint>
+
+    <link name="${gripper_prefix}finger_envelope_l">
+      <collision>
+        <origin xyz="0.034387 0 0.066483" rpy="0 0 0"/>
+        <geometry>
+          <box size="${0.067226 + 2.0 * float(env_margin)}
+                     ${0.061000 + 2.0 * float(env_margin)}
+                     ${0.092000 + 2.0 * float(env_margin)}"/>
+        </geometry>
+      </collision>
+    </link>
+    <joint name="${gripper_prefix}finger_envelope_l_joint" type="fixed">
+      <parent link="${gripper_prefix}base_link"/>
+      <child link="${gripper_prefix}finger_envelope_l"/>
+    </joint>
+  </xacro:if>
+
+</robot>

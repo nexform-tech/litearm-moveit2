@@ -1,0 +1,98 @@
+<?xml version="1.0"?>
+<!--
+  litearm_litegrip_gazebo.urdf.xacro — Gazebo Classic 物理仿真的组合模型。
+
+  与真机/干跑版本共用 litearm_litegrip.geometry.urdf.xacro 的几何、安装变换
+  与夹爪包络，只把硬件块换成 gazebo_ros2_control/GazeboSystem，并追加
+  Gazebo 插件：
+
+      geometry（臂 + 夹爪 + 保守包络）
+        + <ros2_control> GazeboSystem（7 臂关节 position 指令）
+        + <gazebo> libgazebo_ros2_control.so（加载控制器 YAML）
+
+  基座固定
+  ========
+  base_link 标记为 kinematic + 关闭重力：机械臂是固定基座安装，Gazebo 里不能
+  让它被关节反力推走。整臂仍然可以被关节驱动。
+
+  夹爪
+  ====
+  Gazebo Classic 不支持 URDF 的 mimic，夹爪两指在这里是被动关节；本仿真只
+  验证机械臂的避障/执行，夹爪姿态和碰撞由 MoveIt 侧的保守包络负责（Gazebo
+  默认关闭模型自碰撞，包络与手指/基座的重叠不会产生内部接触）。
+
+  坐标约定
+  ========
+  Gazebo 世界与 base_link 重合：机器人 spawn 在 z=0，工作台顶面 z=-0.02，
+  与 config/scene.yaml 的位姿一致（世界里的地面在 z=-0.12，桌子落在上面）。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="litearm">
+
+  <xacro:include filename="litearm_litegrip.geometry.urdf.xacro"/>
+
+  <ros2_control name="LitearmGazeboSystem" type="system">
+    <hardware>
+      <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+    </hardware>
+
+    <joint name="joint1">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint2">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint3">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint4">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint5">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint6">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint7">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <!-- 夹爪没有驱动；只导出状态让 joint_state_broadcaster 发布，
+         MoveIt 的自滤波/Octomap 才能拿到完整状态。 -->
+    <joint name="gripper_opening_joint">
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+
+  <gazebo>
+    <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
+      <parameters>$(find litearm_obstacle_avoidance)/config/litearm_gazebo_controllers.yaml</parameters>
+    </plugin>
+  </gazebo>
+
+  <!-- 固定基座：Gazebo 的 URDF→SDF 会把名为 world 的根 link + fixed joint
+       解释为“模型固定到世界”。机械臂安装在台面上，不能被关节反力推动。
+       MoveIt 侧不使用本文件（改用不带 world 的 litearm_litegrip.urdf.xacro），
+       避免和 SRDF 的 world→base_link 虚拟关节重复。 -->
+  <link name="world"/>
+  <joint name="world_fixed_joint" type="fixed">
+    <parent link="world"/>
+    <child link="base_link"/>
+  </joint>
+
+</robot>

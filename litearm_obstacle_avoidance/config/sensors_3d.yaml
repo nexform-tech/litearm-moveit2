@@ -1,0 +1,31 @@
+# sensors_3d.yaml — Octomap 的 3D 传感器配置（干跑 / 合成点云）。
+#
+# MoveItConfigsBuilder 在 config/sensors_3d.yaml 存在时会自动加载它；
+# 本包的两个 launch 用 sensors_3d_file 参数显式指定，避免真机栈误用
+# 合成数据源。
+#
+# 话题约定：/synthetic_cloud 由 scripts/synthetic_cloud.py 发布（base_link
+# 坐标系下的一个盒子表面）。接真相机时只改 point_cloud_topic 与
+# octomap_frame 相关参数，下游（MoveIt 的 occupancy map monitor）不需要动。
+#
+# octomap_frame 必须是**固定**坐标系：眼在手上时相机随臂运动，填相机 link
+# 会让地图跟着手臂漂移。点云每帧按时间戳的 TF 从它的 frame_id 变换到
+# octomap_frame，所以相机可以动、地图不动。
+
+sensors:
+  - synthetic_cloud
+
+synthetic_cloud:
+  sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
+  point_cloud_topic: /synthetic_cloud
+  max_range: 3.0
+  point_subsample: 1
+  # 传感器侧安全裕度：每个占据栅格向外膨胀 padding_offset（米），
+  # 再按 padding_scale 缩放。这是避障余量最直接的一层。
+  padding_offset: 0.03
+  padding_scale: 1.0
+  max_update_rate: 2.0
+  filtered_cloud_topic: filtered_cloud
+
+octomap_frame: base_link
+octomap_resolution: 0.025
