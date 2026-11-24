@@ -380,6 +380,8 @@ and [examples](https://moveit.picknik.ai/humble/doc/examples/examples.html).
 | Package | Role |
 | --- | --- |
 | `litearm_moveit_config` | MoveIt 2 configuration for the litearm seven-axis arm: SRDF and collision matrix, KDL kinematics, joint limits derived from the firmware parameter table, the OMPL planning pipeline, `moveit_controllers`, RViz layout, launch files, and the acceptance probe |
+| `litearm_obstacle_avoidance` | Combined arm + LiteGrip description and SRDF: the gripper takes part in collision checking as the end tool, and planning parameters are reused from `litearm_moveit_config`. The gripper mounting offset is 0.0538 m, derived from `litearm_full_20261124` plus the 10.3 mm end cap that the gripper replaces; it also carries a `scene.yaml` static cell (scene_builder/scene_probe), a full-travel conservative finger envelope (10 mm margin by default, checked by margin_probe), an execution supervisor (avoid_supervisor: cancel/replan, low-speed retreat on failure, refuse motion on stale data, checked by replan_probe/safety_probe) and the dry-run acceptance scripts |
+| `litearm_d435i_perception` | Gazebo Classic simulation of a fixed external Intel RealSense D435i: the depth point cloud feeds MoveIt's Octomap (with the built-in robot self-filter), pose and joint goals are planned and executed, the remaining trajectory is re-validated against Octomap updates, and a blocked path triggers stop-and-replan; includes an optional Gazebo moving obstacle, RViz layout, and the acceptance probe |
 
 Two notes on that list, both of which the package's own headers explain at
 length:
