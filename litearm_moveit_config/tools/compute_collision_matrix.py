@@ -34,6 +34,10 @@ MoveIt 的 SRDF 必须告诉它"哪些 link 对不需要做自碰撞检查"。�
         --urdf <litearm_description.urdf> --mesh-root <包含 meshes/ 的包目录> \\
         --output srdf_snippet.xml
 
+    # 组合模型（例如机械臂 + 夹爪）：URDF 会引用多个 package:// 包。
+    # --mesh-root 仍然优先，找不到的包再用 ament_index 解析（需 source 工作区）
+    python3 compute_collision_matrix.py --urdf <composed.urdf> --mesh-root <litearm_description share>
+
 输出为可直接粘进 SRDF 的 <disable_collisions> 片段。
 """
 
@@ -112,6 +116,82 @@ def read_binary_stl(path: str, max_points: int) -> np.ndarray:
     return vertices
 
 
+def _downsample(points: np.ndarray, max_points: int) -> np.ndarray:
+    points = np.asarray(points, dtype=np.float64)
+    if max_points > 0 and len(points) > max_points:
+        step = int(math.ceil(len(points) / max_points))
+        points = points[::step]
+    return points
+
+
+def _target_points(max_points: int) -> int:
+    """max_points<=0 表示不抽稀；图元采样需要给它一个默认密度。"""
+    return max_points if max_points > 0 else 12000
+
+
+def box_points(size, max_points: int) -> np.ndarray:
+    """box 表面点云（几何体坐标系，中心在原点）。"""
+    sx, sy, sz = (float(v) for v in size)
+    target = _target_points(max_points)
+    area = 2.0 * (sx * sy + sy * sz + sz * sx)
+    step = max(1e-4, math.sqrt(area / target))
+
+    def values(length: float) -> np.ndarray:
+        count = max(2, int(round(length / step)) + 1)
+        return np.linspace(-0.5 * length, 0.5 * length, count)
+
+    xs, ys, zs = values(sx), values(sy), values(sz)
+    half = (sx, sy, sz)
+    points = []
+    for fixed, axis_a, axis_b in ((0, ys, zs), (1, xs, zs), (2, xs, ys)):
+        grid_a, grid_b = np.meshgrid(axis_a, axis_b, indexing="ij")
+        others = [i for i in range(3) if i != fixed]
+        for face in (-0.5, 0.5):
+            block = np.empty(grid_a.shape + (3,), dtype=np.float64)
+            block[..., fixed] = face * half[fixed]
+            block[..., others[0]] = grid_a
+            block[..., others[1]] = grid_b
+            points.append(block.reshape(-1, 3))
+    return _downsample(np.concatenate(points), max_points)
+
+
+def cylinder_points(radius, length, max_points: int) -> np.ndarray:
+    """cylinder 表面点云（轴为 z，中心在原点）。"""
+    radius, length = float(radius), float(length)
+    target = _target_points(max_points)
+    n_theta = max(12, int(math.sqrt(target / 2.0)))
+    n_z = max(2, target // max(2 * n_theta, 1))
+    theta = np.linspace(0.0, 2.0 * math.pi, n_theta, endpoint=False)
+    zs = np.linspace(-0.5 * length, 0.5 * length, n_z)
+    theta_grid, z_grid = np.meshgrid(theta, zs, indexing="ij")
+    side = np.stack([radius * np.cos(theta_grid),
+                     radius * np.sin(theta_grid),
+                     z_grid], axis=-1).reshape(-1, 3)
+    n_r = max(2, int(math.sqrt(target / 4.0)))
+    radii = np.linspace(0.0, radius, n_r)
+    theta_cap, r_cap = np.meshgrid(theta, radii, indexing="ij")
+    cap = np.stack([r_cap * np.cos(theta_cap),
+                    r_cap * np.sin(theta_cap),
+                    np.zeros_like(r_cap)], axis=-1).reshape(-1, 3)
+    caps = [np.column_stack([cap[:, 0], cap[:, 1],
+                             np.full(len(cap), sign * 0.5 * length)])
+            for sign in (-1.0, 1.0)]
+    return _downsample(np.concatenate([side] + caps), max_points)
+
+
+def sphere_points(radius, max_points: int) -> np.ndarray:
+    """sphere 表面点云（Fibonacci 分布，中心在原点）。"""
+    radius = float(radius)
+    count = max(16, _target_points(max_points))
+    index = np.arange(count) + 0.5
+    phi = np.arccos(1.0 - 2.0 * index / count)
+    theta = math.pi * (1.0 + 5.0 ** 0.5) * index
+    points = np.stack([radius * np.sin(phi) * np.cos(theta),
+                       radius * np.sin(phi) * np.sin(theta),
+                       radius * np.cos(phi)], axis=-1)
+    return _downsample(points, max_points)
+
+
 class LinkGeometry:
     """一个 link 的碰撞点云与其在 link 系下的位姿。"""
 
@@ -127,6 +207,7 @@ class UrdfModel:
     def __init__(self, urdf_path: str, mesh_root: str, max_points: int) -> None:
         root = ET.parse(urdf_path).getroot()
         self.mesh_root = mesh_root.rstrip("/")
+        self._share_dirs: Dict[str, str] = {}
 
         self.links: Dict[str, LinkGeometry] = {}
         for link in root.findall("link"):
@@ -135,15 +216,26 @@ class UrdfModel:
             if collision is None:
                 continue
             geometry = collision.find("geometry")
-            mesh = geometry.find("mesh") if geometry is not None else None
-            if mesh is None:
-                # 非 mesh 碰撞体（box/cylinder）本工程没用到，跳过即可
+            if geometry is None:
                 continue
-            filename = mesh.get("filename")
-            local = filename.split("package://")[-1]
-            local = local.split("/", 1)[1] if "/" in local else local
-            path = f"{self.mesh_root}/{local}"
-            points = read_binary_stl(path, max_points)
+            mesh = geometry.find("mesh")
+            if mesh is not None:
+                points = read_binary_stl(self._mesh_path(mesh.get("filename")),
+                                         max_points)
+            else:
+                # 图元碰撞体（如夹爪全行程包络用的 box）同样需要参与矩阵计算。
+                box = geometry.find("box")
+                cylinder = geometry.find("cylinder")
+                sphere = geometry.find("sphere")
+                if box is not None:
+                    points = box_points(box.get("size").split(), max_points)
+                elif cylinder is not None:
+                    points = cylinder_points(cylinder.get("radius"),
+                                             cylinder.get("length"), max_points)
+                elif sphere is not None:
+                    points = sphere_points(sphere.get("radius"), max_points)
+                else:
+                    continue
             origin_el = collision.find("origin")
             origin = self._origin_matrix(origin_el)
             self.links[name] = LinkGeometry(name, points, origin)
@@ -168,6 +260,35 @@ class UrdfModel:
         self.root_link = self._find_root(root)
         # 按链顺序排列（从根开始），保证父子位姿先算出来
         self.order = self._chain_order()
+
+    def _mesh_path(self, filename: str) -> str:
+        """把 package://<pkg>/<rel> 解析成本地 STL 路径。
+
+        单一 --mesh-root 只能表达一个 package:// 包；组合 URDF（例如机械臂
+        + 夹爪）会同时引用多个包。解析顺序：
+
+          1. --mesh-root/<rel>（保持原有行为，也允许用平铺目录复现）
+          2. ament_index 里 <pkg> 的 share 目录（需要 source 过工作区）
+        """
+        pkg, _, rel = filename.split("package://")[-1].partition("/")
+        if self.mesh_root:
+            candidate = os.path.join(self.mesh_root, rel)
+            if os.path.exists(candidate):
+                return candidate
+        if pkg not in self._share_dirs:
+            try:
+                from ament_index_python.packages import get_package_share_directory
+                self._share_dirs[pkg] = get_package_share_directory(pkg)
+            except Exception:
+                self._share_dirs[pkg] = ""
+        share = self._share_dirs[pkg]
+        candidate = os.path.join(share, rel) if share else ""
+        if share and os.path.exists(candidate):
+            return candidate
+        raise SystemExit(
+            f"找不到网格 {filename}：--mesh-root（{self.mesh_root or '空'}）里没有，"
+            f"ament_index 里也没有可用的 {pkg} 包。请 source 工作区（install/setup.bash），"
+            "或用 --mesh-root 指定包含该文件的目录。")
 
     def _revolute_index(self, joint_name: str) -> int:
         """jointN → 数组下标 N-1。"""
@@ -268,7 +389,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--mesh-root", default="",
                         help="对应 package://<pkg>/ 的本地目录 "
                              "（即包含 meshes/ 的那一级，不是 meshes/ 本身）；"
-                             "留空用 ament_index 定位已安装的 litearm_description 包")
+                             "留空用 ament_index 定位已安装的 litearm_description 包。"
+                             "组合 URDF 里其它 package:// 的包会回退到 ament_index")
     parser.add_argument("--samples", type=int, default=120,
                         help="随机位形采样数（含零位，默认 120）")
     parser.add_argument("--max-points", type=int, default=12000,
