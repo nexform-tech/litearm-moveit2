@@ -1,0 +1,137 @@
+<?xml version="1.0"?>
+<!--
+  d435i_workcell.world — D435i 感知演示工位。
+
+  几何与 litearm_obstacle_avoidance/obstacle_avoidance.world 完全一致
+  （工作台、立柱、方块、地面），差异只有一处：
+  加载 gazebo_ros_state 这个 WorldPlugin，提供
+  /gazebo/set_entity_state，供 dynamic_obstacle.py 移动静态方块。
+
+  为什么不用 gzserver -s libgazebo_ros_state.so
+  ============================================
+  -s 加载的是 SystemPlugin；gazebo_ros_state 是 WorldPlugin，加载时会报
+  “incorrect plugin type”。所以它必须写在世界文件里。
+
+  坐标系与 scene.yaml 对齐：
+    · 机器人 base_link 在 (0,0,0)，spawn 时 z=0；
+    · 工作台顶面 z=-0.04（比旧工位低 2 cm，给 Octomap 膨胀留间隙）；
+    · 夹具体、方块相对旧 scene.yaml 整体下移 2 cm（scene.yaml 默认不加载）；
+    · 地面在 z=-0.12，桌子落在上面。
+
+  ⚠ 改这里的工作台/夹具位姿时，如果同时加载旧包 scene.yaml，两边要同步。
+-->
+<sdf version="1.6">
+  <world name="litearm_d435i_workcell">
+
+    <!-- 动态障碍要用的实体位姿服务（WorldPlugin，不是 SystemPlugin）。 -->
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so">
+      <ros>
+        <namespace>/gazebo</namespace>
+      </ros>
+      <update_rate>5.0</update_rate>
+    </plugin>
+
+    <physics type="ode">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <pose>0 0 -0.12 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>20 20</size></plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>20 20</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>0.6 0.6 0.6 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="workbench">
+      <static>true</static>
+      <pose>0.10 0 -0.08 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.90 0.90 0.08</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.90 0.90 0.08</size></box></geometry>
+          <material>
+            <ambient>0.55 0.4 0.28 1</ambient>
+            <diffuse>0.65 0.48 0.32 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="fixture_pillar">
+      <static>true</static>
+      <pose>0.30 -0.25 0.10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><cylinder><radius>0.04</radius><length>0.28</length></cylinder></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.04</radius><length>0.28</length></cylinder></geometry>
+          <material>
+            <ambient>0.2 0.35 0.5 1</ambient>
+            <diffuse>0.25 0.45 0.65 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="fixture_block">
+      <static>true</static>
+      <pose>-0.30 0.15 0.02 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.12 0.12 0.12</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.12 0.12 0.12</size></box></geometry>
+          <material>
+            <ambient>0.3 0.45 0.3 1</ambient>
+            <diffuse>0.35 0.55 0.35 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="my_obstacle">
+      <static>true</static>
+      <!-- x y z roll pitch yaw；这里的 z 是几何中心，不是底面 -->
+      <pose>0.10 0.25 0.01 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.10 0.10 0.10</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.10 0.10 0.10</size></box></geometry>
+          <material>
+            <ambient>0.6 0.1 0.1 1</ambient>
+            <diffuse>0.9 0.2 0.2 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

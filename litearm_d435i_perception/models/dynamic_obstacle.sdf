@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!--
+  dynamic_obstacle.sdf — 演示用的可移动障碍。
+
+  <static>true</static> 是刻意的：模型由 scripts/dynamic_obstacle.py 通过
+  /gazebo/set_entity_state 直接改写世界位姿，不受重力影响，也不会被机械臂
+  推走。
+
+  ⚠ 只有 visual，没有 collision。演示要验证的是“相机看到障碍 -> Octomap ->
+  重规划”，不是物理接触。保留 collision 时，如果重规划比手臂到达晚一拍，
+  Gazebo 会把手臂顶住，JTC 直接以轨迹误差 abort，验收变得不可控。视觉外观
+  仍然会被深度相机渲染成点云，所以避障链路不受影响。
+
+  视觉尺寸 0.14 m，略大于 Octomap 分辨率 (0.02 m) 的 7 倍，点云落在栅格
+  里足够稳；颜色取高对比度橙色，RViz 的深度点云/Octomap 里容易辨认。
+-->
+<sdf version="1.6">
+  <model name="dynamic_obstacle">
+    <static>true</static>
+
+    <link name="link">
+      <visual name="visual">
+        <geometry>
+          <box><size>0.14 0.14 0.14</size></box>
+        </geometry>
+        <material>
+          <ambient>0.75 0.25 0.05 1</ambient>
+          <diffuse>0.95 0.40 0.08 1</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

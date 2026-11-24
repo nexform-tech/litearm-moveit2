@@ -1,0 +1,55 @@
+# sensors_3d.yaml — D435i 点云进入 MoveIt Octomap 的配置。
+#
+# 数据链路
+# ========
+#   Gazebo depth camera (libgazebo_ros_camera.so)
+#     -> /camera/depth/color/points  (PointCloud2, frame_id=camera_depth_optical_frame)
+#     -> PointCloudOctomapUpdater    (本文件)
+#     -> Octomap (frame_id=base_link)
+#     -> /monitored_planning_scene   (PlanningScene.world.octomap)
+#     -> OMPL 碰撞检查 / 重规划判定
+#
+# 话题名对齐真实 realsense2_camera：接真机时停掉 Gazebo 相机、启动
+# realsense2_camera，本文件不需要改。真机的 D435i 默认也发
+# /camera/depth/color/points，frame_id 是 camera_depth_optical_frame。
+#
+# 自滤波
+# ======
+# PointCloudOctomapUpdater 内部用 ShapeMask 排除落在机器人碰撞体内部的点。
+# move_group 的 PlanningSceneMonitor 会把整机（含夹爪和包络）的碰撞形状注册
+# 进去，所以相机看到的手臂不会在地图里长成“幽灵障碍”。这是 MoveIt 自带的
+# 机制，不需要额外的 self_filter 节点。
+#
+# padding_offset
+# ==============
+# 用 0.01 m 而不是更大的值：工作台顶面在 z=-0.02，base_link 原点在 z=0、
+# 底座碰撞体从 z=0 开始。padding 太大（例如 0.03）会把台面栅格膨胀到 z=0
+# 以上，起始状态直接与环境碰撞，所有规划都会失败。需要更大安全裕度时，
+# 优先抬高整个工位或降低台面，而不是只调这个值。
+#
+# 性能
+# ====
+# 点云是按“够用”选的，不是按相机满分辨率：424x240 深度、subsample=2、
+# Octomap 10 Hz / 0.02 m。640x480 + subsample=2 + 5 Hz 会让 move_group
+# 在空闲时也占满一个核（ShapeMask 对每个点做机器人自滤波），GUI 下 RTF
+# 掉到 0.7 左右。需要更细的地图再往上调，且先确认机器有余量。
+#
+# octomap_frame 必须是固定坐标系。相机固定外置、base_link 固定，所以用
+# base_link；如果以后把相机装到腕部，仍然填 base_link（或 world），不要填
+# 相机 link，否则地图会跟着手臂漂移。
+
+sensors:
+  - d435i_points
+
+d435i_points:
+  sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
+  point_cloud_topic: /camera/depth/color/points
+  max_range: 3.0
+  point_subsample: 2
+  padding_offset: 0.01
+  padding_scale: 1.0
+  max_update_rate: 10.0
+  filtered_cloud_topic: /camera/depth/color/points_filtered
+
+octomap_frame: base_link
+octomap_resolution: 0.02
