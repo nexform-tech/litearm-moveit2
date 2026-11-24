@@ -1,50 +1,56 @@
+English | [简体中文](README.zh-CN.md)
+
+`litearm_d435i_perception` simulates a fixed external Intel RealSense D435i in
+Gazebo Classic. It builds the environment around the seven-axis arm and
+LiteGrip gripper from a real depth point cloud, which enters the MoveIt
+PlanningScene through an Octomap. The package plans and executes pose and joint
+goals, re-checks the remaining trajectory when obstacles change during
+execution, and offers an optional Gazebo moving obstacle (disabled by default).
+
 # litearm_d435i_perception
 
-在 Gazebo Classic 中模拟一台固定外置的 Intel RealSense D435i，用真实深度点云
-构建机械臂 + LiteGrip 夹爪周围的环境；点云经 MoveIt 2 的 Octomap 进入
-PlanningScene，支持位姿/关节目标规划、执行中障碍更新后的“停 → 复检 →
-重规划”，以及可选的 Gazebo 动态障碍（默认关闭）。
+The package does not duplicate the robot model: the composed URDF/SRDF, gripper
+envelope, Gazebo controllers, and workcell world all come from
+`litearm_obstacle_avoidance`; planning parameters come from
+`litearm_moveit_config`.
 
-本包不重复机械臂模型：组合 URDF/SRDF、夹爪包络、Gazebo 控制器、工位 world
-都来自 `litearm_obstacle_avoidance`，规划参数来自 `litearm_moveit_config`。
-
-## 数据链路
+## Data flow
 
 ```text
 Gazebo depth camera (libgazebo_ros_camera.so)
   -> /camera/depth/color/points        (frame_id=camera_depth_optical_frame)
   -> PointCloudOctomapUpdater          (config/sensors_3d.yaml)
-     · ShapeMask 自滤波：排除落在机器人碰撞体内部的点
-     · padding_offset 外扩，降低“擦边”规划
+     - ShapeMask self-filter: drops points inside the robot's collision bodies
+     - padding_offset inflates the map to reduce grazing plans
   -> Octomap (frame_id=base_link)
   -> /monitored_planning_scene
-  -> OMPL 碰撞检查 / d435i_supervisor 剩余轨迹复检
+  -> OMPL collision checking / d435i_supervisor remaining-trajectory re-check
 ```
 
-话题名刻意对齐真实 `realsense2_camera`：
+Topic names deliberately match the real `realsense2_camera`:
 
-| 话题 | 内容 |
+| Topic | Content |
 | --- | --- |
-| `/camera/depth/color/points` | 深度点云（MoveIt 消费） |
-| `/camera/depth/color/depth/image_raw` | 深度图 float32（仿真侧插件附带） |
-| `/camera/color/image_raw` | 彩色图 |
-| `/camera/color/camera_info` | 彩色相机内参 |
+| `/camera/depth/color/points` | Depth point cloud (consumed by MoveIt) |
+| `/camera/depth/color/depth/image_raw` | Depth image, float32 (published by the simulation plugin) |
+| `/camera/color/image_raw` | Color image |
+| `/camera/color/camera_info` | Color camera intrinsics |
 
-## 前置依赖
+## Prerequisites
 
 ```bash
 sudo apt install ros-humble-gazebo-plugins
 ```
 
-`libgazebo_ros_camera.so` 在这个包里；没装时 Gazebo 不会出点云，
-`d435i_supervisor` 会以 `no_sensor/no_octomap` 拒绝运动。
+`libgazebo_ros_camera.so` lives in that package. Without it, Gazebo publishes no
+point cloud and `d435i_supervisor` refuses motion with `no_sensor/no_octomap`.
 
-其余依赖（MoveIt、Gazebo、ros2_control、旧的组合模型包）与
-`litearm_obstacle_avoidance` 相同。
+The remaining dependencies (MoveIt, Gazebo, ros2_control, and the composed model
+package) are the same as for `litearm_obstacle_avoidance`.
 
-## 构建与启动
+## Build and launch
 
-从工作区根目录构建：
+Build from the workspace root:
 
 ```bash
 cd ~/litearm_ws
@@ -53,201 +59,224 @@ colcon build
 source install/setup.bash
 ```
 
-有显示环境：
+With a display:
 
 ```bash
 ros2 launch litearm_d435i_perception d435i_avoidance.launch.py
 ```
 
-无显示（验收/服务器）：
+Without a display (acceptance or server):
 
 ```bash
 ros2 launch litearm_d435i_perception d435i_avoidance.launch.py \
   gui:=false use_rviz:=false
 ```
 
-默认 `ROS_DOMAIN_ID=42`、`ROS_LOCALHOST_ONLY=1`。别的终端要 export 同样的值。
+The defaults are `ROS_DOMAIN_ID=42` and `ROS_LOCALHOST_ONLY=1`. Export the same
+values in every other terminal.
 
-关键 launch 参数：
+Key launch arguments:
 
-| 参数 | 默认 | 说明 |
+| Argument | Default | Purpose |
 | --- | --- | --- |
-| `gui` | `true` | 启动 gzclient |
-| `use_rviz` | `true` | 启动 RViz2（含点云、图像、Octomap 场景） |
-| `scene_file` | 空 | 可选加载旧包 `scene.yaml` 静态碰撞对象；默认只用相机 Octomap |
-| `camera_mount_file` | `config/camera_mount.yaml` | 相机安装位姿（Gazebo 与 TF 共用） |
-| `start_camera` | `true` | 插入 Gazebo D435i；接真机/外部相机时设 `false` |
-| `sensor_heartbeat_topic` | `/camera/color/camera_info` | supervisor 判传感器存活用的小消息话题 |
-| `start_dynamic_obstacle` | `false` | 默认不插入动态障碍；`true` 才插入并驱动 `dynamic_obstacle` |
-| `dynamic_mode` | `sweep` | `sweep` 往复；`once` 走一遍就停 |
+| `gui` | `true` | Start gzclient |
+| `use_rviz` | `true` | Start RViz2 with point cloud, image, and Octomap scene |
+| `scene_file` | empty | Optionally load the static collision objects from the older package's `scene.yaml`; by default only the camera Octomap is used |
+| `camera_mount_file` | `config/camera_mount.yaml` | Camera mount pose, shared by Gazebo and TF |
+| `start_camera` | `true` | Insert the Gazebo D435i; set `false` for a real or external camera |
+| `sensor_heartbeat_topic` | `/camera/color/camera_info` | Small topic the supervisor uses to decide whether the sensor is alive |
+| `start_dynamic_obstacle` | `false` | Insert and drive `dynamic_obstacle`; off by default |
+| `dynamic_mode` | `sweep` | `sweep` moves back and forth; `once` stops at the end |
 | `dynamic_speed` | `0.20` | m/s |
-| `extra_gazebo_args` | 空 | 追加给 gzserver，例如 `--verbose` |
+| `extra_gazebo_args` | empty | Appended to gzserver, for example `--verbose` |
 
-## 性能
+## Performance
 
-这套栈在集显 + 桌面后台较重时容易卡。实测（i5-14450HX、集显，同时开着
-VSCode/Firefox）：
+This stack struggles on integrated graphics when the desktop has a heavy
+background load. Measured on an i5-14450HX with integrated graphics while
+VSCode and Firefox were open:
 
-| 配置 | 主要 CPU | RTF |
+| Configuration | Main CPU | RTF |
 | --- | --- | --- |
-| 640×480/15 Hz、subsample=2、Octomap 5 Hz、GUI+RViz | move_group 65–99%、rviz2 53%、gzserver 34%、gzclient 15% | 0.745 |
-| 当前默认（424×240、深度 10 Hz/彩色 5 Hz、subsample=2、Octomap 10 Hz/0.02 m、RViz 15 FPS） | 明显下降 | 接近 1.0 |
+| 640×480/15 Hz, subsample=2, Octomap 5 Hz, GUI+RViz | move_group 65–99%, rviz2 53%, gzserver 34%, gzclient 15% | 0.745 |
+| Current default (424×240, depth 10 Hz/color 5 Hz, subsample=2, Octomap 10 Hz/0.02 m, RViz 15 FPS) | Clearly lower | Close to 1.0 |
 
-瓶颈不是规划器本身，而是：
+The planner itself is not the bottleneck. The cost comes from:
 
-- `PointCloudOctomapUpdater` 的 **ShapeMask 自滤波**：每个点都要对机器人
-  碰撞体做包含判断，点云越密、更新越频繁，`move_group` 越吃 CPU；
-- **RViz + Gazebo GUI** 的场景/点云/图像渲染共用集显；
-- supervisor 之前为了判断传感器存活，订阅并反序列化了整份 `PointCloud2`
-  （Python 每帧几百 KB）；现在改订阅 `/camera/color/camera_info`。
+- **ShapeMask self-filtering** in `PointCloudOctomapUpdater`: every point is
+  tested against the robot's collision bodies, so denser clouds and faster
+  updates cost `move_group` more CPU;
+- **RViz + Gazebo GUI** sharing integrated graphics for scene, cloud, and image
+  rendering;
+- The supervisor used to subscribe to and deserialize the whole `PointCloud2`
+  to check sensor liveness (hundreds of KB per frame in Python). It now
+  subscribes to `/camera/color/camera_info` instead.
 
-如果仍然卡，按顺序试：
+If the stack is still slow, try these in order:
 
-1. **只留一个界面**：`gui:=false use_rviz:=true`，或
-   `gui:=false use_rviz:=false` 看纯仿真。
-2. 在 RViz Displays 里关掉「相机彩色图」；「相机点云」默认已关闭，需要看
-   原始点云时再打开（Octomap 在 MotionPlanning 的 Scene Geometry 里）。
-3. 继续降 `models/d435i_camera.sdf` 的分辨率/帧率，或把
-   `config/sensors_3d.yaml` 的 `point_subsample` 提到 4，或把
-   `octomap_resolution` 调到 0.03。**不要**把 `max_update_rate` 降到 5 Hz 以下：手臂在动，点云和自滤波的
-   机器人位姿有时间差，更新太慢会把旧手臂点留成幽灵障碍，supervisor 会
-   反复重规划。10 Hz（与深度相机同频）是默认值。
-4. 用 `top` 和 `gz stats` 区分：`gzserver` 高 = 相机渲染/物理；`move_group`
-   高 = 点云/Octomap；`rviz2` 高 = 显示内容。
+1. **Keep only one interface**: `gui:=false use_rviz:=true`, or
+   `gui:=false use_rviz:=false` for pure simulation.
+2. In RViz Displays, turn off the color image. The raw camera point cloud is
+   off by default; enable it only when you need it (the Octomap is under
+   MotionPlanning, Scene Geometry).
+3. Lower the resolution or frame rate in `models/d435i_camera.sdf`, raise
+   `point_subsample` to 4 in `config/sensors_3d.yaml`, or set
+   `octomap_resolution` to 0.03. **Do not** drop `max_update_rate` below 5 Hz:
+   the arm moves, so the cloud and the self-filtered robot pose differ in time.
+   Slow updates leave ghost obstacles from the old arm pose, and the supervisor
+   replans repeatedly. 10 Hz (the depth camera rate) is the default.
+4. Use `top` and `gz stats` to separate the causes: high `gzserver` means
+   camera rendering or physics; high `move_group` means cloud or Octomap; high
+   `rviz2` means display content.
 
-## 验收
+## Acceptance
 
 ```bash
 ros2 run litearm_d435i_perception acceptance_d435i.sh
 ```
 
-或分步：
+Or step by step:
 
 ```bash
-# 终端 1：起栈（无显示）
+# Terminal 1: start the stack without a display
 ros2 launch litearm_d435i_perception d435i_avoidance.launch.py \
   gui:=false use_rviz:=false
 
-# 终端 2：同一 ROS_DOMAIN_ID / ROS_LOCALHOST_ONLY
+# Terminal 2: same ROS_DOMAIN_ID / ROS_LOCALHOST_ONLY
 ros2 run litearm_d435i_perception d435i_probe.py
 ```
 
-`d435i_probe.py` 依次检查：
+`d435i_probe.py` checks the following in order:
 
-1. 相机点云在发，`/monitored_planning_scene` 出现非空 Octomap，
-   supervisor 确认 `octomap_seen=true`；
-2. 回到 `ready`，再用 `/compute_fk` 把一个已知可达关节位形换算成
-   `ee_link` 位姿，作为 `PoseStamped` 目标；经 `/compute_ik` + OMPL
-   规划并执行，位置误差 < 5 cm、姿态误差 < 0.2 rad；
-3. 回 `ready`；
-4. 再发位姿目标；从 supervisor 刚发布的轨迹中取中点附近（50%）的
-   `ee_link` 位姿，把 Gazebo 里的 `dynamic_obstacle` 直接移到那里
-   （相机能看到，Octomap 会更新）；
-5. 期望 supervisor 复检剩余轨迹 → 取消 → 重规划，`replans >= 1`，
-   最终仍 `succeeded`。
+1. The camera point cloud is publishing, a non-empty Octomap appears in
+   `/monitored_planning_scene`, and the supervisor reports `octomap_seen=true`.
+2. Return to `ready`, then use `/compute_fk` to convert a known reachable joint
+   configuration into an `ee_link` pose and send it as a `PoseStamped` goal.
+   `/compute_ik` plus OMPL plans and executes it; the position error must stay
+   below 5 cm and the orientation error below 0.2 rad.
+3. Return to `ready`.
+4. Send another pose goal. Take the `ee_link` pose near the midpoint (50%) of
+   the trajectory the supervisor just published, and move the Gazebo
+   `dynamic_obstacle` there directly. The camera sees it, and the Octomap
+   updates.
+5. Expect the supervisor to re-check the remaining trajectory, cancel, and
+   replan with `replans >= 1`, while the final state remains `succeeded`.
 
-第 4 步是刻意的**确定性注入**：固定往复 sweep 不一定真的穿过当前规划
-路径，验收需要可重复触发。**动态障碍默认关闭**，所以默认跑验收时第 4/5
-步会自动跳过，只覆盖“感知 + 静态位姿”；要看动态重规划，用
-`start_dynamic_obstacle:=true` 启动。
+Step 4 is a deliberate **deterministic injection**: a fixed sweep does not
+necessarily cross the current planned path, and acceptance needs a repeatable
+trigger. **The dynamic obstacle is off by default**, so the default acceptance
+run skips steps 4 and 5 and covers only perception plus static pose goals. To
+exercise dynamic replanning, start with `start_dynamic_obstacle:=true`.
 
-## 动态障碍演示（默认关闭）
+## Dynamic obstacle demo (disabled by default)
 
-需要动态障碍时显式启动：
+Start the stack with the dynamic obstacle explicitly enabled:
 
 ```bash
 ros2 launch litearm_d435i_perception d435i_avoidance.launch.py \
   start_dynamic_obstacle:=true dynamic_mode:=sweep
 ```
 
-方块先停在 park，不会自己动；再手动使能：
+The block waits at the park position and does not move until you enable it:
 
 ```bash
-# 开始往复（once 模式则走到终点后停）
+# Start the sweep (once mode stops at the end)
 ros2 service call /dynamic_obstacle/enable std_srvs/srv/SetBool "{data: true}"
-# 暂停
+# Pause
 ros2 service call /dynamic_obstacle/enable std_srvs/srv/SetBool "{data: false}"
-# 回到 park
+# Return to park
 ros2 service call /dynamic_obstacle/reset std_srvs/srv/Trigger
 ```
 
-在 RViz 里能同时看到彩色/深度点云和 Octomap 随方块更新。固定 sweep 不一定
-穿过当前规划路径；要现场看重规划，可在机械臂执行中发一个会穿过 sweep 的
-位姿目标，或直接用 `d435i_probe.py` 的确定性注入。
+RViz shows the color and depth clouds and the Octomap updating as the block
+moves. A fixed sweep does not necessarily cross the current planned path. To
+see replanning live, send a pose goal that crosses the sweep while the arm is
+executing, or use the deterministic injection in `d435i_probe.py`.
 
-## 节点与接口
+## Nodes and interfaces
 
-| 节点/脚本 | 作用 |
+| Node or script | Purpose |
 | --- | --- |
-| `spawn_model.py` | 从 SDF/URDF 文件插入 Gazebo；启动顺序里相机/障碍先于机器人 |
-| `camera_tf.py` | `base_link -> camera_link -> *_optical_frame` 静态 TF |
-| `gazebo_robot_description.py` | 只提供 Gazebo 侧 `robot_description` 参数给 `gazebo_ros2_control` |
-| `dynamic_obstacle.py` | 通过 `/gazebo/set_entity_state` 驱动方块；`/dynamic_obstacle/enable`、`/dynamic_obstacle/reset` |
-| `d435i_supervisor.py` | 位姿/关节目标、规划执行、剩余轨迹复检、停-重规划、失败撤退 |
-| `d435i_probe.py` | 验收探针 |
+| `spawn_model.py` | Insert an SDF/URDF file into Gazebo; the start sequence inserts the camera and obstacle before the robot |
+| `camera_tf.py` | Static TF from `base_link` to `camera_link` and the two optical frames |
+| `gazebo_robot_description.py` | Serve the Gazebo-side `robot_description` parameter to `gazebo_ros2_control` |
+| `dynamic_obstacle.py` | Drive the block through `/gazebo/set_entity_state`; `/dynamic_obstacle/enable`, `/dynamic_obstacle/reset` |
+| `d435i_supervisor.py` | Pose and joint goals, planning and execution, remaining-trajectory re-check, stop-and-replan, retreat on failure |
+| `d435i_probe.py` | Acceptance probe |
 
-supervisor 接口：
+Supervisor interfaces:
 
-| 类型 | 名称 |
+| Type | Name |
 | --- | --- |
-| 目标 | `/d435i_supervisor/goal_pose` (`geometry_msgs/PoseStamped`) |
-| 目标 | `/d435i_supervisor/goal_joints` (`sensor_msgs/JointState`) |
-| 状态 | `/d435i_supervisor/status` (`std_msgs/String`, JSON) |
-| 轨迹 | `/d435i_supervisor/planned_trajectory` |
-| 服务 | `/d435i_supervisor/cancel` (`std_srvs/Trigger`) |
+| Goal | `/d435i_supervisor/goal_pose` (`geometry_msgs/PoseStamped`) |
+| Goal | `/d435i_supervisor/goal_joints` (`sensor_msgs/JointState`) |
+| Status | `/d435i_supervisor/status` (`std_msgs/String`, JSON) |
+| Trajectory | `/d435i_supervisor/planned_trajectory` |
+| Service | `/d435i_supervisor/cancel` (`std_srvs/Trigger`) |
 
-执行节拍：规划走 `/plan_kinematic_path`，执行走
-`/joint_trajectory_controller/follow_joint_trajectory`。
+Execution path: planning uses `/plan_kinematic_path`; execution uses
+`/joint_trajectory_controller/follow_joint_trajectory`.
 
-## 几个 Gazebo Classic 的坑（本包已处理）
+## Gazebo Classic pitfalls (handled by this package)
 
-这些不是 MoveIt 的问题，但会直接让仿真“看起来没反应”，因此写在这里：
+These are not MoveIt problems, but they make the simulation appear unresponsive,
+so they are documented here:
 
-1. **link/joint 同名冲突**：sdformat9 把 link、joint、frame 放在同一个
-   命名空间；litearm 描述里 link 和 joint 都叫 `joint1..joint7`，直接
-   插入 Gazebo 会报 `Joint ... has a name collision`，模型插件不加载。
-   launch 只在送进 Gazebo 的那份 URDF 里把冲突 link 改成 `gz_joint1..`；
-   MoveIt 模型保持原名。
-2. **`package://` 网格**：Gazebo Classic 不认 ROS 的 package URI，会去
-   `models.gazebosim.org` 找，世界加载可能卡几分钟。launch 把 Gazebo 侧
-   网格改写成 `file://<package_share>/...` 绝对路径。
-3. **空几何 dummy link**：夹爪的 `litegrip_gripper_opening_link` 没有几何/
-   惯性，URDF→SDF 时连同 `gripper_opening_joint` 一起被丢弃，导致
-   `/joint_states` 缺关节、MoveIt 报 “Missing gripper_opening_joint”。
-   launch 给这类关节子 link 补一个极小惯性。
-4. **TF 与 Gazebo 模型分离**：`robot_state_publisher` 用 MoveIt 模型发
-   `joint1..` 的 TF，Octomap 的 ShapeMask 才能做机器人自滤波；
-   `gazebo_ros2_control` 通过 `gazebo_robot_description` 节点读带
-   `gz_joint*` 的 Gazebo 模型。
-5. **插件搜索路径**：不用 `gazebo_ros/gzserver.launch.py`，直接起
-   gzserver 并显式给全 `GAZEBO_PLUGIN_PATH` / `LD_LIBRARY_PATH`，
-   否则 `libgazebo_ros2_control.so` 静默不加载，`controller_manager`
-   永远不出现。
+1. **link/joint name collisions**: sdformat9 puts links, joints, and frames in
+   one namespace. The litearm description names both links and joints
+   `joint1..joint7`, so inserting it directly into Gazebo reports
+   `Joint ... has a name collision` and model plugins do not load. The launch
+   file renames the colliding links to `gz_joint1..` only in the URDF sent to
+   Gazebo; the MoveIt model keeps the original names.
+2. **`package://` meshes**: Gazebo Classic does not understand ROS package URIs.
+   It looks on `models.gazebosim.org`, and world loading can stall for minutes.
+   The launch file rewrites Gazebo-side meshes to absolute
+   `file://<package_share>/...` paths.
+3. **Empty geometry on dummy links**: the gripper's
+   `litegrip_gripper_opening_link` has no geometry or inertia, so the URDF to
+   SDF conversion drops it together with `gripper_opening_joint`. Then
+   `/joint_states` lacks the joint and MoveIt reports
+   "Missing gripper_opening_joint". The launch file gives such child links a
+   minimal inertia.
+4. **TF and the Gazebo model are separate**: `robot_state_publisher` publishes
+   TF for `joint1..` from the MoveIt model, which the Octomap ShapeMask needs
+   for self-filtering. `gazebo_ros2_control` reads the Gazebo model with
+   `gz_joint*` through the `gazebo_robot_description` node.
+5. **Plugin search path**: the launch file does not use
+   `gazebo_ros/gzserver.launch.py`. It starts gzserver directly and sets the
+   full `GAZEBO_PLUGIN_PATH` and `LD_LIBRARY_PATH`; otherwise
+   `libgazebo_ros2_control.so` silently fails to load and `controller_manager`
+   never appears.
 
-## 接真实 D435i
+## Connecting a real D435i
 
-1. 安装并启动 `realsense2_camera`，确认它发
-   `/camera/depth/color/points`，frame 为 `camera_depth_optical_frame`。
-2. 停掉 Gazebo 相机：不启动 `spawn_model.py` 的相机模型，或使用
-   `start_camera:=false` 的变体；`sensors_3d.yaml` 不用改。
-3. 把 `camera_mount.yaml` 的 `xyz/rpy` 换成实测标定值，仍然发布
-   `base_link -> camera_link` 静态 TF。
-4. 机械臂换成真实控制栈（`litearm_moveit_config` 的直连 USB 启动），
-   `d435i_supervisor` 可以原样使用；注意真实 D435i 的近距噪声和
-   `padding_offset` 需要按现场重新调。
+1. Install and start `realsense2_camera`, and confirm it publishes
+   `/camera/depth/color/points` with frame `camera_depth_optical_frame`.
+2. Stop the Gazebo camera: do not start the camera model in `spawn_model.py`,
+   or use a variant with `start_camera:=false`. `sensors_3d.yaml` does not need
+   to change.
+3. Replace the `xyz/rpy` values in `camera_mount.yaml` with your calibration.
+   The package still publishes the static `base_link -> camera_link` TF.
+4. Switch the arm to the real control stack (the direct-USB launch in
+   `litearm_moveit_config`). `d435i_supervisor` works unchanged. Note that the
+   real D435i's near-range noise and `padding_offset` need retuning on site.
 
-当前包的固定外置假设是 `base_link` 不随臂运动。若以后改成腕部安装，
-Octomap 的 `octomap_frame` 仍应填固定的 `base_link`（或 `world`），
-不要填相机 link。
+This package assumes a fixed external camera where `base_link` does not move
+with the arm. If you later mount the camera on the wrist, keep the Octomap
+`octomap_frame` at the fixed `base_link` (or `world`), not at the camera link.
 
-## 已知限制
+## Known limitations
 
-- supervisor 是“停 → 复检 → 重规划”，不是 MoveIt Servo 的实时避障；
-  从发现障碍到新轨迹生效有秒级延迟。
-- Octomap 在规划期间仍在更新，OMPL 返回的路径可能被规划后校验判为无效。
-  supervisor 会在 `max_replans` 预算内重试；验收日志里 `replans` 因此可能
-  大于“障碍事件数”，这是预期行为。
-- 点云自滤波只能排除机器人当前位形；快速运动时的拖影可能短时进入地图。
-- `padding_offset` 默认 0.01 m，是为了避免工作台栅格膨胀到机器人底座；
-  要更大安全裕度时优先抬工位/降台面，不要只调这个值。
-- Gazebo Classic 已 EOL；本包只针对 Humble + Gazebo 11。
+- The supervisor implements stop, re-check, and replan, not MoveIt Servo's
+  real-time avoidance. Several seconds can pass between detecting an obstacle
+  and executing a new trajectory.
+- The Octomap keeps updating during planning, so a path returned by OMPL may
+  fail the post-planning validation. The supervisor retries within its
+  `max_replans` budget. `replans` in acceptance logs can therefore exceed the
+  number of obstacle events; this is expected.
+- Point cloud self-filtering only removes the robot's current configuration.
+  Fast motion can leave brief trails in the map.
+- `padding_offset` defaults to 0.01 m so the workbench grid does not inflate
+  into the robot base. For more safety margin, raise the workcell or lower the
+  table first; do not only increase this value.
+- Gazebo Classic is end-of-life. This package targets Humble and Gazebo 11 only.
