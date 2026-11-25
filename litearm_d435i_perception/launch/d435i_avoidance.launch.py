@@ -141,6 +141,72 @@ def _add_missing_inertia(urdf_text):
     return ET.tostring(root, encoding="unicode")
 
 
+def _normalize_gripper_prefix(urdf_text):
+    """把夹爪的未加前缀 link 改名为 litegrip_*。
+
+    litearm_litegrip.geometry.urdf.xacro 声明了 link_prefix=litegrip_，但它
+    include litegrip_description 时没有把 arg 传进去；被包含文件自己的
+    <xacro:arg name="link_prefix" default=""/> 会把值重置成空。结果夹爪的
+    base_link 与机械臂 base_link 重名，URDF 解析直接报
+    "link 'base_link' is not unique"，Gazebo/MoveIt 都起不来。
+
+    这里做一次确定性的后处理：只改夹爪的 link（joint 名是控制器契约，保持
+    不变），并同步 joint 的 parent/child 引用。已带前缀时函数是幂等的。
+    """
+    root = ET.fromstring(urdf_text)
+    links = {link.get("name"): link for link in root.findall("link")}
+    if "base_footprint" not in links:
+        return urdf_text
+
+    rename = {
+        "base_footprint": "litegrip_base_footprint",
+        "gripper_opening_link": "litegrip_gripper_opening_link",
+        "gripper_slider_link1": "litegrip_gripper_slider_link1",
+        "gripper_slider_link2": "litegrip_gripper_slider_link2",
+    }
+
+    # 夹爪 base_link 是 base_footprint 之后的第一个 base_link；机械臂的
+    # base_link 在 base_footprint 之前。不要用“最后一个”这种顺序假设。
+    link_elements = root.findall("link")
+    footprint_index = next(
+        (i for i, link in enumerate(link_elements)
+         if link.get("name") == "base_footprint"), None)
+    gripper_base_link = None
+    if footprint_index is not None:
+        for link in link_elements[footprint_index + 1:]:
+            if link.get("name") == "base_link":
+                gripper_base_link = link
+                break
+
+    for link in root.findall("link"):
+        name = link.get("name")
+        if name in ("base_footprint", "gripper_opening_link",
+                    "gripper_slider_link1", "gripper_slider_link2"):
+            link.set("name", rename[name])
+
+    if gripper_base_link is not None:
+        gripper_base_link.set("name", "litegrip_base_link")
+        rename["base_link"] = "litegrip_base_link"
+
+    gripper_joints = {
+        "base_footprint_joint", "gripper_opening_joint",
+        "gripper_slide_joint_right", "gripper_slide_joint_left",
+    }
+    for joint in root.findall("joint"):
+        if joint.get("name") not in gripper_joints:
+            continue
+        for tag in ("parent", "child"):
+            ref = joint.find(tag)
+            if ref is not None and ref.get("link") in rename:
+                ref.set("link", rename[ref.get("link")])
+
+    for elem in root.iter("gazebo"):
+        ref = elem.get("reference")
+        if ref in rename:
+            elem.set("reference", rename[ref])
+    return ET.tostring(root, encoding="unicode")
+
+
 def _rename_gazebo_links(urdf_text):
     """只给 Gazebo 侧 URDF 的冲突 link 加前缀。
 
@@ -289,9 +355,13 @@ def _launch_setup(context, *_args, **_kwargs):
     # 命名空间冲突。
     gazebo_xacro = os.path.join(
         old_share, "config", "litearm_litegrip_gazebo.urdf.xacro")
-    raw = subprocess.check_output(["xacro", gazebo_xacro], text=True)
+    raw = subprocess.check_output(
+        ["xacro", gazebo_xacro,
+         f"gripper_envelope_margin:={resolve('gripper_envelope_margin')}"],
+        text=True)
     raw = re.sub(r"<!--.*?-->", "", raw, flags=re.S)
     raw = re.sub(r"<\?xml[^>]*\?>", "", raw)
+    raw = _normalize_gripper_prefix(raw)
     raw = _resolve_package_uris(raw)
     gazebo_description = _add_missing_inertia(_rename_gazebo_links(raw))
     robot_description = " ".join(gazebo_description.split())
@@ -328,7 +398,13 @@ def _launch_setup(context, *_args, **_kwargs):
         ["xacro", moveit_xacro,
          f"gripper_envelope_margin:={resolve('gripper_envelope_margin')}"],
         text=True)
+    rsp_description = _normalize_gripper_prefix(rsp_description)
     rsp_description = " ".join(rsp_description.split())
+
+    # builder 展开 xacro 时同样会带上未加前缀的夹爪 link；统一用后处理后的
+    # 描述，保证 robot_state_publisher / move_group / RViz 看到同一份模型。
+    moveit_config.robot_description = {
+        "robot_description": rsp_description}
 
     environment = [
         SetEnvironmentVariable("ROS_DOMAIN_ID", env["ROS_DOMAIN_ID"]),
