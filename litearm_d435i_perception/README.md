@@ -280,6 +280,8 @@ executing, or use the deterministic injection in `d435i_probe.py`.
 | `move_block.py` | Command-line client: `move_block.py X Y Z [--yaw R]` / `--reset` |
 | `dynamic_obstacle.py` | Drive the block through `/gazebo/set_entity_state`; `/dynamic_obstacle/enable`, `/dynamic_obstacle/reset` |
 | `d435i_supervisor.py` | Pose and joint goals, planning and execution, remaining-trajectory re-check, stop-and-replan, retreat on failure |
+| `wrist_scan.py` | Wrist-camera multi-view scan: IK, plan/execute, stop-and-stare, Octomap fusion, coverage report |
+| `wrist_runtime_probe.py` | Inject a box mid-trajectory and verify the runtime re-check/replan |
 | `d435i_probe.py` | Acceptance probe |
 
 Supervisor interfaces:
@@ -325,6 +327,12 @@ so they are documented here:
    full `GAZEBO_PLUGIN_PATH` and `LD_LIBRARY_PATH`; otherwise
    `libgazebo_ros2_control.so` silently fails to load and `controller_manager`
    never appears.
+6. **Gripper link prefix**: `litearm_litegrip.geometry.urdf.xacro` includes
+   `litegrip_description` without passing `link_prefix`, so the included file's
+   empty default wins and the gripper's `base_link` collides with the arm's
+   (`link 'base_link' is not unique`). Both launches post-process the expanded
+   URDF and rename the gripper links to `litegrip_*`; joint names are unchanged.
+   If you change the model, re-check for duplicate link names.
 
 ## Connecting a real D435i
 
@@ -343,6 +351,134 @@ This package assumes a fixed external camera where `base_link` does not move
 with the arm. If you later mount the camera on the wrist, keep the Octomap
 `octomap_frame` at the fixed `base_link` (or `world`), not at the camera link.
 
+## Wrist-mounted camera scan (optional)
+
+The fixed external camera launch above remains available. The wrist scan is a
+separate launch and must not run at the same time (both publish
+`/camera/...`):
+
+```bash
+# GUI
+ros2 launch litearm_d435i_perception d435i_wrist_scan.launch.py
+
+# Headless
+ros2 launch litearm_d435i_perception d435i_wrist_scan.launch.py \
+  gui:=false use_rviz:=false
+
+# Only solve/validate the viewpoints, never move the arm
+ros2 launch litearm_d435i_perception d435i_wrist_scan.launch.py \
+  gui:=false use_rviz:=false scan_dry_run:=true
+```
+
+The camera is a fixed robot link (`config/wrist_camera.xacro`) attached to
+`ee_link`, so `robot_state_publisher` publishes the dynamic chain
+`base_link -> ... -> camera_link -> camera_*_optical_frame`. The default mount
+is **side-looking**: `camera_mount_xyz="0 0.075 0.02"`,
+`camera_mount_rpy="0 0 0"` (camera +X = ee_link +X). Pointing the optical axis
+along the tool axis (rpy `0 -pi/2 0`) makes the downward scan poses
+kinematically unreachable on this arm — at the top/55° positions KDL returned
+no solution for all tested seeds. Change the mount only after verifying with
+`scan_dry_run:=true`.
+
+`wrist_scan.py` generates a top view and a 55° ring (8 azimuths by default),
+optionally a 30° front ring; solves IK with several seeds; validates each state;
+orders views **top first and low ring last**; reaches each ring view through a
+pre-view 8 cm above it and then descends; plans each leg with OMPL and executes
+it on the JTC; and dwells at every view while `PointCloudOctomapUpdater` fuses
+the cloud into the same `base_link` Octomap. Cross-workspace transfers carry a
+path constraint keeping `ee_link` above `scan_safe_transfer_z` (0.30 m); if the
+constrained plan fails, it retries unconstrained and logs a warning. Coverage
+statistics use `/camera/depth/color/points_filtered`.
+
+The launch runs **two depth cameras into one Octomap** using
+`config/sensors_3d_wrist.yaml`: the fixed external D435i on
+`/fixed_camera/depth/color/points` with `fixed_camera_*` frames, and the wrist
+D435i on `/camera/...`. The fixed camera keeps a continuous global view of the
+workcell; the wrist camera fills occlusions and near-field detail. No known
+static scene is preloaded by default — the table and fixtures are observed by
+the two cameras. `scene_file:=...` can still load an optional known scene.
+
+Viewpoints are ordered **top first, then descending elevation**, so the 30° ring
+is last; the top elevation produces a single view because all azimuths coincide.
+Each ring view is approached through a pre-view 8 cm above it, then a short
+descent. The transfer to a pre-view carries a path constraint keeping `ee_link`
+at or above `scan_safe_transfer_z` (0.30 m). If that constrained plan fails, the
+node retries without the constraint and logs a warning, so the scan still
+progresses. This is best-effort for unknown geometry: the fixed camera covers
+most of the workcell continuously, but objects outside both fields of view or
+first seen mid-scan are only handled by the current Octomap. The default
+planning budget is 6 s / 12 attempts because paths near the workcell can be
+tight.
+
+During execution the scan also listens to `/monitored_planning_scene`. When the
+Octomap or collision objects update, it re-checks the **remaining** trajectory
+points with `/check_state_validity` (throttled by `scan_check_period`, starting
+after `scan_check_lookahead`). If any sampled point is blocked, it cancels the
+JTC goal, waits `scan_cancel_settle`, and replans from the current state, up to
+`scan_max_exec_replans` times. Every planned trajectory is published on
+`/wrist_scan/planned_trajectory`. This is stop-and-replan, not MoveIt Servo: a
+very fast obstacle can still reach the arm between checks, but a new obstacle
+in the remaining path no longer goes unnoticed.
+
+Deterministic validation: a 6 cm box was injected at the midpoint of the first
+trajectory via `/apply_planning_scene`; the scan reported
+`runtime_replans=1`, `validity_checks=361`, and completed 2/2 views with no
+failures. Run the same check with:
+
+```bash
+ros2 run litearm_d435i_perception wrist_runtime_probe.py
+```
+
+It waits for `/wrist_scan/planned_trajectory`, injects a 6 cm box at the first
+long trajectory's midpoint, expects `runtime_replans >= 1`, then removes the
+box. Exit code 0 means the recheck fired; 2 means it did not.
+
+| Argument | Default | Purpose |
+| --- | --- | --- |
+| `scan_targets` | `0.10,0.0,0.10` | look-at points, `;` separated |
+| `scan_radius` | `0.40` | camera-to-target distance (m) |
+| `scan_elevations` | `90,55` | view elevations (deg); add `30` for a low front ring |
+| `scan_azimuths` | `8` | views per ring |
+| `scan_dwell` | `0.60` | settle time per view (s) |
+| `scan_coverage_target` | `0.90` | early stop threshold (runs reach ~40–57%, so the full pattern runs) |
+| `scan_max_views` | `0` | cap on executed views (0 = all) |
+| `scan_clear_octomap` | `false` | clear the map before scanning; false keeps the startup map and avoids mid-scan table regrowth |
+| `scan_top_first` | `true` | top view first, descending elevations; low ring last |
+| `scan_safe_transfer` | `true` | approach each ring view from an 8 cm pre-view; add a minimum-height path constraint on transfers |
+| `scan_safe_transfer_z` | `0.30` | minimum `ee_link` height for constrained transfers (m) |
+| `scan_approach_height` | `0.08` | pre-view height above the target view (m) |
+| `scan_runtime_check` | `true` | re-check the remaining trajectory when the scene updates |
+| `scan_check_period` | `0.50` | re-check throttle (s) |
+| `scan_check_lookahead` | `0.40` | skip this much of the already-committed path (s) |
+| `scan_check_stride` | `2` | sample every Nth remaining trajectory point |
+| `scan_max_exec_replans` | `3` | replans per blocked trajectory segment |
+| `scan_cancel_settle` | `0.50` | wait after canceling the JTC goal (s) |
+| `scene_file` | empty | optional known static scene; empty uses the two cameras only |
+| `start_fixed_camera` | `true` | run the fixed external D435i into the same Octomap; false selects `sensors_3d_wrist_only.yaml` |
+| `fixed_camera_mount_file` | `config/fixed_camera_mount.yaml` | fixed camera mount pose/frames |
+| `scan_roi_min` / `scan_roi_max` | `-0.40,-0.50,-0.05` / `0.60,0.50,0.45` | coverage ROI |
+| `scan_dry_run` | `false` | IK/validity only, no motion |
+| `camera_mount_xyz` / `camera_mount_rpy` | `0 0.075 0.02` / `0 0 0` | wrist mount |
+
+Interfaces: `/wrist_scan/status` (JSON: state, views, coverage, cloud frames,
+`runtime_replans`, `validity_checks`, `scene_objects_seen`),
+`/wrist_scan/planned_trajectory` (each planned `JointTrajectory`),
+`/wrist_scan/start` and `/wrist_scan/cancel` (`std_srvs/Trigger`). Auto-start is
+on by default after `scan_start_delay`.
+
+Coverage is a **proxy**, not a guarantee of "all surfaces": it counts voxels in
+the configured ROI that were observed along camera rays at
+`scan_coverage_resolution`. In testing, the default 9-view pattern observed
+roughly 40–57% of the configured ROI (the number varies with capture timing),
+and the optional 30° ring adds more; the rest is occluded volume behind objects,
+under the table, or outside the reachable viewpoints. Constrained transfers can
+fall back to unconstrained planning on a tight path; that is logged. In testing,
+9/9 and 14/14 views executed. Use the Octomap plus the object-completion/padding
+measures for the residual. The scan does **not** clear the Octomap by default
+because both cameras have already been building it during startup; clearing it
+(`scan_clear_octomap:=true`) makes the table reappear during the scan and far
+views can become unplannable until it is re-observed.
+
 ## Known limitations
 
 - The supervisor implements stop, re-check, and replan, not MoveIt Servo's
@@ -358,3 +494,9 @@ with the arm. If you later mount the camera on the wrist, keep the Octomap
   into the robot base. For more safety margin, raise the workcell or lower the
   table first; do not only increase this value.
 - Gazebo Classic is end-of-life. This package targets Humble and Gazebo 11 only.
+- Killing a launch with `SIGKILL` (or `timeout`) can leave `scene_builder`,
+  `gazebo_robot_description`, `movable_block`, or Gazebo processes alive; a
+  later `move_group` may then receive stale planning-scene objects, and TF/sim
+  time can be polluted (symptoms: `TF_OLD_DATA` floods, self-filtered robot
+  points becoming obstacles, planning failing with `99999`). Stop with Ctrl-C,
+  or kill all stale `litearm`/`gazebo` processes before restarting.

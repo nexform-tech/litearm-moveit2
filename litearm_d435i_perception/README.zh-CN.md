@@ -262,6 +262,8 @@ ros2 service call /dynamic_obstacle/reset std_srvs/srv/Trigger
 | `move_block.py` | 命令行客户端：`move_block.py X Y Z [--yaw R]` / `--reset` |
 | `dynamic_obstacle.py` | 通过 `/gazebo/set_entity_state` 驱动方块；`/dynamic_obstacle/enable`、`/dynamic_obstacle/reset` |
 | `d435i_supervisor.py` | 位姿/关节目标、规划执行、剩余轨迹复检、停-重规划、失败撤退 |
+| `wrist_scan.py` | 腕装相机多视角扫描：IK、规划执行、停稳采集、Octomap 融合、覆盖率报告 |
+| `wrist_runtime_probe.py` | 在轨迹中点注入障碍，验证运行时复检/重规划 |
 | `d435i_probe.py` | 验收探针 |
 
 supervisor 接口：
@@ -301,6 +303,12 @@ supervisor 接口：
    gzserver 并显式给全 `GAZEBO_PLUGIN_PATH` / `LD_LIBRARY_PATH`，
    否则 `libgazebo_ros2_control.so` 静默不加载，`controller_manager`
    永远不出现。
+6. **夹爪 link 前缀**：`litearm_litegrip.geometry.urdf.xacro` include
+   `litegrip_description` 时没有把 `link_prefix` 传进去，被包含文件的空
+   默认值生效，夹爪的 `base_link` 与机械臂的 `base_link` 重名
+   （`link 'base_link' is not unique`）。两个 launch 都会在展开后把夹爪
+   link 改名为 `litegrip_*`（joint 名保持不变）。改模型后请重新检查是否有
+   重名 link。
 
 ## 接真实 D435i
 
@@ -318,6 +326,118 @@ supervisor 接口：
 Octomap 的 `octomap_frame` 仍应填固定的 `base_link`（或 `world`），
 不要填相机 link。
 
+## 腕装相机多视角扫描（可选）
+
+上面的固定外置相机 launch 仍然保留。腕装扫描是另一个 launch，两者都会发
+`/camera/...`，不要同时启动：
+
+```bash
+# 有显示
+ros2 launch litearm_d435i_perception d435i_wrist_scan.launch.py
+
+# 无显示
+ros2 launch litearm_d435i_perception d435i_wrist_scan.launch.py \
+  gui:=false use_rviz:=false
+
+# 只做 IK/可达性检查，不动机械臂
+ros2 launch litearm_d435i_perception d435i_wrist_scan.launch.py \
+  gui:=false use_rviz:=false scan_dry_run:=true
+```
+
+相机是挂在 `ee_link` 上的固定机器人 link（`config/wrist_camera.xacro`），
+`robot_state_publisher` 会发布 `base_link -> ... -> camera_link ->
+camera_*_optical_frame` 的动态 TF。默认是**侧视**安装：
+`camera_mount_xyz="0 0.075 0.02"`、`camera_mount_rpy="0 0 0"`
+（相机 +X = ee_link +X）。把光轴装成工具轴方向（rpy `0 -pi/2 0`）会让
+顶视/环视的朝下位形在本臂上不可达——实测顶视和 55° 位置 KDL 全种子无解。
+改安装位姿后先用 `scan_dry_run:=true` 验证。
+
+`wrist_scan.py` 生成顶视 + 55° 环视（默认 8 个方位角），可选 30° 前侧
+低环；用多组种子解 IK 并逐个校验状态；**顶视优先、低环最后**；每个环视
+先到上方 8 cm 的预视角，再短距离下降；每段用 OMPL 规划、JTC 执行；每个
+视角停稳 dwell 秒，让 `PointCloudOctomapUpdater` 把点云融进同一张
+`base_link` Octomap。跨工位转移加 `ee_link` 最低高度路径约束
+（`scan_safe_transfer_z`，默认 0.30 m）；约束规划失败会回退无约束并打
+warning。覆盖率统计用 `/camera/depth/color/points_filtered`。
+
+launch 用 `config/sensors_3d_wrist.yaml` 把**两台深度相机融进同一张
+Octomap**：固定外置 D435i 用 `/fixed_camera/depth/color/points` 和
+`fixed_camera_*` 帧，腕装 D435i 用 `/camera/...`。固定相机连续看整个
+工作台，腕装相机补遮挡和近场细节。默认不再预置已知静态工位，桌子/夹具
+由这两台相机观测；需要额外已知场景时可传 `scene_file:=...`。
+
+视角按**顶视优先、仰角从高到低**排序，30° 低环最后；顶视所有方位角重合，
+只生成一个视角。每个环视先到上方 8 cm 的预视角，再短距离下降；到预视角
+的转移带 `ee_link` 最低高度路径约束（`scan_safe_transfer_z`，默认
+0.30 m）。约束规划失败时会回退无约束并打 warning，保证扫描继续。这对
+未观测几何仍是尽力而为：固定相机覆盖了大部分工位，但两台相机都看不到的
+物体、或扫描中途才出现的物体，只受当前 Octomap 保护。默认规划预算为
+6 s / 12 次，因为工位附近的路径可能较紧。
+
+执行期间扫描节点还监听 `/monitored_planning_scene`：地图或碰撞对象更新时，
+对**剩余轨迹点**调用 `/check_state_validity` 复检（用 `scan_check_period`
+限频，从 `scan_check_lookahead` 之后开始采样）。发现被挡就取消 JTC goal、
+等 `scan_cancel_settle` 停稳，再从当前状态重规划，单段最多
+`scan_max_exec_replans` 次。每条规划轨迹都会发布到
+`/wrist_scan/planned_trajectory`。这是“停-重规划”，不是 MoveIt Servo：
+极快的动态障碍仍可能在两次复检之间碰到手臂，但剩余路径上的新障碍不会
+再被忽略。
+
+确定性验证：通过 `/apply_planning_scene` 在第一条轨迹中点注入一个 6 cm
+方块，扫描报告 `runtime_replans=1`、`validity_checks=361`，2/2 视角
+全部完成且无失败。可用下面命令复现：
+
+```bash
+ros2 run litearm_d435i_perception wrist_runtime_probe.py
+```
+
+它等待 `/wrist_scan/planned_trajectory`，在第一条足够长的轨迹中点注入
+6 cm 方块，期望 `runtime_replans >= 1`，结束后移除方块。退出码 0 表示
+复检触发；2 表示没有触发。
+
+| 参数 | 默认 | 作用 |
+| --- | --- | --- |
+| `scan_targets` | `0.10,0.0,0.10` | 注视点，分号分隔 |
+| `scan_radius` | `0.40` | 相机到注视点距离（m） |
+| `scan_elevations` | `90,55` | 仰角（deg）；加 `30` 得到低环 |
+| `scan_azimuths` | `8` | 每圈方位角数量 |
+| `scan_dwell` | `0.60` | 每视角停稳采集秒数 |
+| `scan_coverage_target` | `0.90` | 达到后提前结束（实测约 40–57%，默认会跑完整个图案） |
+| `scan_max_views` | `0` | 最多执行视角数（0=全部） |
+| `scan_clear_octomap` | `false` | 扫描前清空地图；false 保留启动期间建好的地图，避免扫描中桌子重新生长 |
+| `scan_top_first` | `true` | 顶视优先，按仰角从高到低，低环最后 |
+| `scan_safe_transfer` | `true` | 每个环视从上方 8 cm 预视角接近；跨工位转移加最低高度路径约束 |
+| `scan_safe_transfer_z` | `0.30` | 转移时 `ee_link` 最低高度（m） |
+| `scan_approach_height` | `0.08` | 预视角相对目标视角的抬升高度（m） |
+| `scan_runtime_check` | `true` | 场景更新时复检剩余轨迹 |
+| `scan_check_period` | `0.50` | 复检限频（s） |
+| `scan_check_lookahead` | `0.40` | 跳过已承诺路径的时间（s） |
+| `scan_check_stride` | `2` | 剩余轨迹采样步长（轨迹点） |
+| `scan_max_exec_replans` | `3` | 单段轨迹被挡时最多重规划次数 |
+| `scan_cancel_settle` | `0.50` | 取消 JTC goal 后等待停稳（s） |
+| `scene_file` | 空 | 可选已知静态场景；空 = 只用两台相机 |
+| `start_fixed_camera` | `true` | 启动固定外置 D435i，与腕装相机喂同一张 Octomap；false 时使用 `sensors_3d_wrist_only.yaml` |
+| `fixed_camera_mount_file` | `config/fixed_camera_mount.yaml` | 固定相机安装位姿/帧名 |
+| `scan_roi_min` / `scan_roi_max` | `-0.40,-0.50,-0.05` / `0.60,0.50,0.45` | 覆盖率 ROI |
+| `scan_dry_run` | `false` | 只做 IK/校验，不运动 |
+| `camera_mount_xyz` / `camera_mount_rpy` | `0 0.075 0.02` / `0 0 0` | 腕装位姿 |
+
+接口：`/wrist_scan/status`（JSON：状态、视角数、覆盖率、点云帧数、
+`runtime_replans`、`validity_checks`、`scene_objects_seen`）、
+`/wrist_scan/planned_trajectory`（每条 `JointTrajectory`）、
+`/wrist_scan/start`、`/wrist_scan/cancel`（`std_srvs/Trigger`）。
+默认 `scan_auto_start=true`，等待 `scan_start_delay` 后自动开始。
+
+覆盖率是**代理指标**，不代表“看到了所有表面”：它统计配置 ROI 内、沿相机
+射线被观测到的体素（`scan_coverage_resolution`）。实测默认 9 个视角
+（1 个顶视 + 8 个 55°）覆盖约 40–57%（随采集时序有波动），加可选 30° 低环
+会更多；剩余部分是物体背面、桌面下方和可达视角以外的体积。约束转移在
+路径很紧时可能回退无约束（会打 warning）。实测 9/9 和 14/14 视角全部
+执行成功。残余盲区仍要靠 Octomap + 可见表面补全/安全
+margin 兜底。扫描默认**不**清空 Octomap——两台相机从启动起就在建图；清空
+（`scan_clear_octomap:=true`）会让桌子在扫描过程中重新长出来，远侧视角
+可能因此无法规划，直到桌子被重新观测到。
+
 ## 已知限制
 
 - supervisor 是“停 → 复检 → 重规划”，不是 MoveIt Servo 的实时避障；
@@ -329,3 +449,8 @@ Octomap 的 `octomap_frame` 仍应填固定的 `base_link`（或 `world`），
 - `padding_offset` 默认 0.01 m，是为了避免工作台栅格膨胀到机器人底座；
   要更大安全裕度时优先抬工位/降台面，不要只调这个值。
 - Gazebo Classic 已 EOL；本包只针对 Humble + Gazebo 11。
+- 用 `SIGKILL`（或 `timeout`）结束 launch 可能留下 `scene_builder`、
+  `gazebo_robot_description`、`movable_block` 或 Gazebo 进程。之后启动的
+  `move_group` 可能收到旧的 planning-scene 对象，TF/仿真时间也会被污染
+  （症状：`TF_OLD_DATA` 刷屏、机器人自身点云变成障碍、规划报 `99999`）。
+  请用 Ctrl-C 正常停止，或在重启前清掉所有残留的 `litearm`/`gazebo` 进程。
