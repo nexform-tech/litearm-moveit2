@@ -32,6 +32,9 @@ class SpawnRobot(Node):
         self.declare_parameter("robot_description_topic", "/robot_description")
         self.declare_parameter("service_name", "/spawn_entity")
         self.declare_parameter("z", 0.0)
+        # Gazebo 侧模型与 ROS/MoveIt 侧模型可能不同（例如 link 改名后）。
+        # 给了 robot_xml 就直接用它插入，不再等 /robot_description 话题。
+        self.declare_parameter("robot_xml", "")
         self.description = None
 
         qos = QoSProfile(depth=1,
@@ -52,7 +55,9 @@ def main():
     node = SpawnRobot()
     try:
         deadline = node.get_clock().now().nanoseconds / 1e9 + 60.0
-        while node.description is None or not node.client.service_is_ready():
+        robot_xml = str(node.get_parameter("robot_xml").value or "")
+        while ((not robot_xml and node.description is None)
+               or not node.client.service_is_ready()):
             if node.get_clock().now().nanoseconds / 1e9 > deadline:
                 print("✗ 等待 /robot_description 或 /spawn_entity 超时",
                       file=sys.stderr)
@@ -65,7 +70,8 @@ def main():
         # controller_manager；多行字符串会让 rcl 的参数覆盖解析器报
         # "Couldn't parse parameter override rule"。压成单行发送（只影响
         # Gazebo 插入的模型；RSP/MoveIt 仍用原始的 /robot_description）。
-        request.xml = " ".join(node.description.split())
+        description = robot_xml or node.description
+        request.xml = " ".join(description.split())
         request.robot_namespace = ""
         request.reference_frame = "world"
         request.initial_pose = Pose()

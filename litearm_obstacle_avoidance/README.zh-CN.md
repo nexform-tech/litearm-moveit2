@@ -94,11 +94,32 @@ ros2 launch litearm_obstacle_avoidance obstacle_gazebo.launch.py \
 ```
 
 Gazebo 栈把 `mock_components` 换成 Gazebo Classic 物理引擎。控制器名称、JTC action
-与探针接口都保持不变，因此 `acceptance_fake.sh` 里的探针可以直接复用它。
+与探针接口都保持不变，因此包内的探针可以直接复用它。
 
 `worlds/obstacle_avoidance.world` 里的世界几何必须与 `config/scene.yaml` 一致。
 在一个文件里改了夹具位姿，就要同步改另一个；否则 Gazebo 与 MoveIt 对障碍物位置的
 判断会不一致。
+
+### Gazebo Classic 的坑（本包已处理）
+
+这些不是 MoveIt 的问题，但会让仿真看起来“没反应”：
+
+1. **link/joint 同名**：sdformat9 把 link、joint、frame 放在同一个命名空间。
+   litearm 描述里 link 和 joint 都叫 `joint1..joint7`，直接插入 Gazebo 会报
+   `Joint ... has a name collision`，模型插件不加载。launch 只在送入 Gazebo 的
+   那份 URDF 里把冲突 link 改成 `gz_joint1..`，MoveIt 模型保持原名。
+2. **`package://` 网格**：Gazebo Classic 不认 ROS package URI，会去
+   `models.gazebosim.org` 找；模型插入会卡住。launch 把 Gazebo 侧网格改写成
+   `file://<package_share>/...` 绝对路径。
+3. **空几何 dummy link**：`litegrip_gripper_opening_link` 没有几何/惯性，
+   URDF→SDF 时会连同 `gripper_opening_joint` 一起被丢弃。launch 给这类关节子
+   link 补一个极小惯性。
+4. **TF 与 Gazebo 模型分离**：`robot_state_publisher` 用 MoveIt 模型发
+   `joint1..` 的 TF；`gazebo_ros2_control` 通过 `gazebo_robot_description`
+   节点读取带 `gz_joint1..` 的 Gazebo 模型。
+5. **插件搜索路径**：launch 不用 `gazebo_ros/gzserver.launch.py`，而是直接起
+   gzserver 并显式设置 `GAZEBO_PLUGIN_PATH` / `LD_LIBRARY_PATH`；否则
+   `libgazebo_ros2_control.so` 静默不加载，`controller_manager` 不出现。
 
 ## Launch 文件
 
@@ -115,7 +136,8 @@ Gazebo 栈把 `mock_components` 换成 Gazebo Classic 物理引擎。控制器�
 
 ## 验收探针
 
-包内提供四个分阶段探针。每个探针都针对正在运行的栈，只有全部检查通过才返回 `0`。
+包内提供四个阶段验收探针，以及一个性能基线探针。每个探针都针对正在运行的栈：
+验收探针只有全部检查通过才返回 `0`；基线探针采集到有效样本即返回 `0`。
 
 | 探针 | 阶段 | 检查内容 |
 | --- | --- | --- |
@@ -123,6 +145,7 @@ Gazebo 栈把 `mock_components` 换成 Gazebo Classic 物理引擎。控制器�
 | `margin_probe.py` | 2 | 手指包络覆盖夹爪张开行程；在包络外缘之外放小方块仍会碰撞，证明 margin 已生效 |
 | `replan_probe.py` | 3 | 执行中注入障碍会触发取消与重规划；目标被挡住时触发低速撤退或安全停靠 |
 | `safety_probe.py` | 4 | `/joint_states` 过期时监督节点拒绝新运动，且不发布任何轨迹 |
+| `timing_probe.py` | 基线 | 固定起点/目标重复规划，输出规划墙钟与 MoveIt 内部耗时；对轨迹逐点调用 `/check_state_validity`，输出碰撞检查耗时 |
 
 辅助程序：
 
@@ -132,6 +155,7 @@ Gazebo 栈把 `mock_components` 换成 Gazebo Classic 物理引擎。控制器�
 | `synthetic_cloud.py` | 没有相机时在 `/synthetic_cloud` 发布长方体表面点云 |
 | `avoid_supervisor.py` | 规划、执行、取消与重规划；失败时撤退或停住 |
 | `spawn_robot.py` | 把机器人插入 Gazebo，避开 `gazebo_ros/spawn_entity.py` 在 conda 环境下的 `lxml` 问题 |
+| `gazebo_robot_description.py` | 只提供 Gazebo 侧 `robot_description` 参数，供 `gazebo_ros2_control` 读取；不发 TF |
 | `acceptance_fake.sh` | 启动干跑栈、等待就绪、运行选定探针、收栈 |
 
 一条命令跑完四个阶段：
@@ -151,6 +175,15 @@ ros2 run litearm_obstacle_avoidance acceptance_fake.sh --scene --margin --replan
 | `--margin` | 阶段 2 裕度探针 |
 | `--replan` | 阶段 3 重规划探针；会启动监督节点 |
 | `--safety` | 阶段 4 数据过期探针；会启动监督节点 |
+| `--timing` | 性能基线探针；输出规划时间与碰撞检查耗时 |
+
+`--timing` 用固定的 ready 起点和 `GOAL` 目标重复规划（默认 10 次），分别输出
+`/plan_kinematic_path` 的墙钟往返耗时与 MoveIt 返回的 `planning_time`；再对每条
+轨迹的每个点调用 `/check_state_validity`，统计单点与单条轨迹的碰撞检查耗时。
+结果只做信息输出，不设通过阈值；JSON 默认写入
+`~/.ros/litearm_timing_baseline.json`。单独运行时可调 `--iterations`、
+`--planning-time`、`--attempts`、`--velocity-scaling`，或用 `--output` 改路径
+（传空字符串则不落盘）。
 
 **不要**在另一个栈占用同一 ROS domain 时运行 `acceptance_fake.sh`。脚本会启动自己的
 栈并在退出时收栈；同一个 domain 里出现两套 `/controller_manager` 或 `/move_group`

@@ -16,6 +16,8 @@
 #                                           # 取消/重规划；目标被包住 -> 安全撤退/停靠）
 #   scripts/acceptance_fake.sh --safety     # 另加阶段 4 验收（停掉
 #                                           # joint_state_broadcaster -> 数据过期拒动）
+#   scripts/acceptance_fake.sh --timing     # 另加性能基线（规划时间与
+#                                           # 碰撞检查耗时，写入 JSON）
 #
 # 验证的是：/move_action -> move_group -> follow_joint_trajectory -> JTC
 # -> mock 硬件 -> /joint_states 收敛到目标。不会动机械臂。
@@ -71,12 +73,14 @@ SCENE_PROBE="$SCRIPT_DIR/scene_probe.py"
 MARGIN_PROBE="$SCRIPT_DIR/margin_probe.py"
 REPLAN_PROBE="$SCRIPT_DIR/replan_probe.py"
 SAFETY_PROBE="$SCRIPT_DIR/safety_probe.py"
+TIMING_PROBE="$SCRIPT_DIR/timing_probe.py"
 
 USE_CLOUD=0
 USE_SCENE=0
 USE_MARGIN=0
 USE_REPLAN=0
 USE_SAFETY=0
+USE_TIMING=0
 for arg in "$@"; do
     case "$arg" in
         --cloud) USE_CLOUD=1 ;;
@@ -84,6 +88,7 @@ for arg in "$@"; do
         --margin) USE_MARGIN=1 ;;
         --replan) USE_REPLAN=1 ;;
         --safety) USE_SAFETY=1 ;;
+        --timing) USE_TIMING=1 ;;
         *) echo "未知参数: $arg" >&2; exit 2 ;;
     esac
 done
@@ -283,6 +288,17 @@ if [ "$USE_SAFETY" = 1 ]; then
         echo "[accept] 安全验收失败（退出码 $SAFETY_RC）"
         tail -60 "$LOG"
         exit "$SAFETY_RC"
+    fi
+fi
+
+if [ "$USE_TIMING" = 1 ]; then
+    echo "[accept] ===== 性能基线：规划时间与碰撞检查耗时 ====="
+    "$PYTHON" "$TIMING_PROBE"
+    TIMING_RC=$?
+    if [ "$TIMING_RC" -ne 0 ]; then
+        echo "[accept] 性能基线采集失败（退出码 $TIMING_RC）"
+        tail -40 "$LOG"
+        exit "$TIMING_RC"
     fi
 fi
 

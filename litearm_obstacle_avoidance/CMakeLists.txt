@@ -12,14 +12,17 @@ install(DIRECTORY config launch worlds
 #   scene_builder.py   把 scene.yaml 写进 PlanningScene
 #   synthetic_cloud.py 无相机时打通 Octomap 链路
 #   scene_probe.py     阶段 1 场景验收
+#   gazebo_robot_description.py  只给 gazebo_ros2_control 提供 Gazebo 侧描述
 #   acceptance_fake.sh 一键干跑验收
 install(PROGRAMS
   scripts/scene_builder.py
   scripts/scene_probe.py
   scripts/margin_probe.py
   scripts/avoid_supervisor.py
+  scripts/gazebo_robot_description.py
   scripts/replan_probe.py
   scripts/safety_probe.py
+  scripts/timing_probe.py
   scripts/spawn_robot.py
   scripts/synthetic_cloud.py
   scripts/acceptance_fake.sh

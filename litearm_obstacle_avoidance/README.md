@@ -99,11 +99,37 @@ ros2 launch litearm_obstacle_avoidance obstacle_gazebo.launch.py \
 
 The Gazebo stack replaces `mock_components` with the Gazebo Classic physics
 engine. Controller names, the JTC action, and the probe interfaces stay the
-same, so `acceptance_fake.sh` probes can be reused against it.
+same, so the package's probes can be reused against it.
 
 The world geometry in `worlds/obstacle_avoidance.world` must match
 `config/scene.yaml`. If you move a fixture in one file, move it in the other;
 otherwise Gazebo and MoveIt disagree about where the obstacles are.
+
+### Gazebo Classic pitfalls (handled here)
+
+These are not MoveIt problems, but they make the simulation appear unresponsive:
+
+1. **link/joint name collisions**: sdformat9 puts links, joints, and frames in a
+   single namespace. The litearm description names both links and joints
+   `joint1..joint7`, so inserting it directly into Gazebo reports
+   `Joint ... has a name collision` and model plugins do not load. The launch
+   renames the colliding links to `gz_joint1..` only in the URDF sent to Gazebo;
+   the MoveIt model keeps the original names.
+2. **`package://` meshes**: Gazebo Classic does not understand ROS package URIs
+   and looks on `models.gazebosim.org`, stalling model insertion. The launch
+   rewrites Gazebo-side meshes to absolute `file://<package_share>/...` paths.
+3. **Empty-geometry dummy links**: `litegrip_gripper_opening_link` has no
+   geometry or inertia, so URDF to SDF conversion drops it together with
+   `gripper_opening_joint`. The launch adds a minimal inertia to such child
+   links.
+4. **TF and the Gazebo model are separate**: `robot_state_publisher` publishes
+   TF for `joint1..` from the MoveIt model; `gazebo_ros2_control` reads the
+   Gazebo model with `gz_joint1..` from the `gazebo_robot_description` node.
+5. **Plugin search path**: the launch does not use
+   `gazebo_ros/gzserver.launch.py`; it starts gzserver directly and sets
+   `GAZEBO_PLUGIN_PATH` / `LD_LIBRARY_PATH` explicitly. Otherwise
+   `libgazebo_ros2_control.so` silently fails to load and `controller_manager`
+   never appears.
 
 ## Launch files
 
@@ -121,8 +147,10 @@ Gazebo model adds a fixed `world` link that MoveIt must not see twice.
 
 ## Acceptance probes
 
-The package has four staged probes. Each one runs against a live stack and
-exits `0` only when every check passes.
+The package has four staged acceptance probes plus one performance-baseline
+probe. Each one runs against a live stack: the acceptance probes exit `0` only
+when every check passes, and the timing probe exits `0` once it has collected a
+valid baseline.
 
 | Probe | Stage | Checks |
 | --- | --- | --- |
@@ -130,6 +158,7 @@ exits `0` only when every check passes.
 | `margin_probe.py` | 2 | the finger envelope covers the open-gripper travel; a small box just outside the envelope edge still collides, proving the margin is applied |
 | `replan_probe.py` | 3 | an obstacle injected mid-execution triggers cancel and replan; a blocked goal triggers a low-speed retreat or a safe stop |
 | `safety_probe.py` | 4 | stale `/joint_states` makes the supervisor refuse new motion and publish no trajectory |
+| `timing_probe.py` | baseline | repeated planning from a fixed start to a fixed goal reports planning wall-clock and MoveIt internal time; per-point `/check_state_validity` calls report collision-check cost |
 
 Supporting programs:
 
@@ -139,6 +168,7 @@ Supporting programs:
 | `synthetic_cloud.py` | publishes a box-surface point cloud on `/synthetic_cloud` when no camera is available |
 | `avoid_supervisor.py` | plans, executes, cancels, and replans; retreats or stops on failure |
 | `spawn_robot.py` | inserts the robot into Gazebo without the conda `lxml` problem in `gazebo_ros/spawn_entity.py` |
+| `gazebo_robot_description.py` | provides only the Gazebo-side `robot_description` parameter for `gazebo_ros2_control`; publishes no TF |
 | `acceptance_fake.sh` | starts the dry-run stack, waits for readiness, runs the selected probes, and stops the stack |
 
 Run all four stages with one command:
@@ -158,6 +188,17 @@ ros2 run litearm_obstacle_avoidance acceptance_fake.sh --scene --margin --replan
 | `--margin` | stage 2 margin probe |
 | `--replan` | stage 3 replan probe; starts the supervisor |
 | `--safety` | stage 4 stale-data probe; starts the supervisor |
+| `--timing` | performance baseline; reports planning and collision-check time |
+
+`--timing` plans repeatedly from the fixed ready start to `GOAL` (10 iterations
+by default) and reports both the `/plan_kinematic_path` wall-clock round trip
+and the `planning_time` returned by MoveIt. It then calls
+`/check_state_validity` for every point of every trajectory and reports the
+per-point and per-trajectory collision-check cost. The results are
+informational, with no pass threshold; the JSON baseline is written to
+`~/.ros/litearm_timing_baseline.json`. When run directly, it also accepts
+`--iterations`, `--planning-time`, `--attempts`, and `--velocity-scaling`, plus
+`--output` to change the path (an empty string disables the JSON file).
 
 **Do not** run `acceptance_fake.sh` while another stack uses the same ROS
 domain. The script starts its own stack and stops it on exit; two
