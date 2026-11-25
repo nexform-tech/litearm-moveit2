@@ -11,7 +11,8 @@
       + static TF: base_link -> camera_link -> *_optical_frame
       + gazebo_ros2_control -> controller_manager -> JSB + JTC
       + move_group（本包 sensors_3d.yaml：点云 -> Octomap）
-      + dynamic_obstacle（Gazebo 里可移动的静态方块）
+      + movable_block（默认开启：可随时改位的静态物块）
+      + dynamic_obstacle（可选：Gazebo 里自动往复的静态方块）
       + d435i_supervisor（规划/执行/剩余轨迹复检/重规划）
       + 可选 scene_builder（旧包 scene.yaml）与 RViz
 
@@ -21,6 +22,12 @@
     # 无显示：只跑 gzserver（验收脚本用）
     ros2 launch litearm_d435i_perception d435i_avoidance.launch.py \
         gui:=false use_rviz:=false
+
+    # 物块就位后，另开终端（同一 ROS_DOMAIN_ID / ROS_LOCALHOST_ONLY）改位置：
+    ros2 run litearm_d435i_perception move_block.py 0.25 0.10 0.20
+    ros2 run litearm_d435i_perception move_block.py --reset
+    物块移动后 D435i 在新位置渲染它，/camera/depth/color/points 与
+    Octomap 实时更新。
 
 前置依赖
 ========
@@ -34,6 +41,7 @@ libgazebo_ros_camera.so 在这个包里；没装时 Gazebo 会报 plugin not fou
 export 同样的值才能看到这套图。
 """
 
+import math
 import os
 import re
 import subprocess
@@ -63,6 +71,18 @@ def _parse_bool(value, fallback=False):
     if text in ("0", "false", "no", "off", ""):
         return False
     return fallback
+
+
+def _parse_xyz(text, fallback):
+    """解析 'x y z' / 'x,y,z'；非法时回退并保留 launch 可启动。"""
+    try:
+        values = [float(v) for v in re.split(r"[,\s]+", str(text).strip())
+                  if v]
+    except ValueError:
+        return list(fallback)
+    if len(values) != 3 or not all(math.isfinite(v) for v in values):
+        return list(fallback)
+    return values
 
 
 def _isolation_env(domain_id, localhost_only):
@@ -203,6 +223,16 @@ def _declare_arguments(share, old_share):
                         "对应的 CameraInfo 话题"),
         DeclareLaunchArgument("start_supervisor", default_value="true",
                               description="启动 d435i_supervisor"),
+        DeclareLaunchArgument(
+            "start_movable_block", default_value="true",
+            description="插入可通过 ROS 接口实时改位的演示物块（默认开启）"),
+        DeclareLaunchArgument(
+            "movable_block_pose", default_value="0.30 0.55 -0.06",
+            description="物块初始位置 x y z（world/base_link，m）；默认在"
+                        "工位外的地面上，相机可见但不挡机械臂"),
+        DeclareLaunchArgument(
+            "movable_block_yaw", default_value="0.0",
+            description="物块初始绕 Z 轴朝向（rad）"),
         DeclareLaunchArgument("start_dynamic_obstacle", default_value="false",
                               description="默认关闭；true = 插入并驱动 Gazebo 动态方块"),
         DeclareLaunchArgument("dynamic_mode", default_value="sweep",
@@ -226,6 +256,15 @@ def _launch_setup(context, *_args, **_kwargs):
     gui = _parse_bool(resolve("gui"), True)
     use_rviz = _parse_bool(resolve("use_rviz"), True)
     start_supervisor = _parse_bool(resolve("start_supervisor"), True)
+    start_movable = _parse_bool(resolve("start_movable_block"), True)
+    movable_pose = _parse_xyz(resolve("movable_block_pose"),
+                              [0.30, 0.55, -0.06])
+    try:
+        movable_yaw = float(resolve("movable_block_yaw"))
+    except ValueError:
+        movable_yaw = 0.0
+    if not math.isfinite(movable_yaw):
+        movable_yaw = 0.0
     start_dynamic = _parse_bool(resolve("start_dynamic_obstacle"), False)
     start_camera = _parse_bool(resolve("start_camera"), True)
     domain_id = resolve("ros_domain_id").strip() or DEFAULT_DOMAIN_ID
@@ -395,6 +434,41 @@ def _launch_setup(context, *_args, **_kwargs):
     if start_camera:
         actions += [camera_spawn, camera_tf]
 
+    # 可改位物块：同样先于机器人插入；spawn_model 退出后再起控制节点，
+    # 避免对还不存在的实体调用 set_entity_state。节点启动后会重试，
+    # 所以即使 Gazebo 稍慢也不会丢掉初始位姿。
+    if start_movable:
+        block_spawn = Node(
+            package="litearm_d435i_perception",
+            executable="spawn_model.py",
+            output="screen",
+            additional_env=env,
+            parameters=[{
+                "entity_name": "movable_block",
+                "model_file": os.path.join(
+                    share, "models", "movable_block.sdf"),
+                "x": movable_pose[0],
+                "y": movable_pose[1],
+                "z": movable_pose[2],
+                "yaw": movable_yaw,
+            }],
+        )
+        block_node = Node(
+            package="litearm_d435i_perception",
+            executable="movable_block.py",
+            output="screen",
+            additional_env=env,
+            parameters=[{
+                "entity_name": "movable_block",
+                "initial_pose": movable_pose,
+                "initial_yaw": movable_yaw,
+                "use_sim_time": True,
+            }],
+        )
+        actions.append(block_spawn)
+        actions.append(RegisterEventHandler(OnProcessExit(
+            target_action=block_spawn, on_exit=[block_node])))
+
     if start_dynamic:
         obstacle_spawn = Node(
             package="litearm_d435i_perception",
@@ -501,11 +575,15 @@ def _launch_setup(context, *_args, **_kwargs):
         f"  Gazebo GUI:  {gui}    RViz: {use_rviz}\n"
         f"  Supervisor:  {start_supervisor}   动态障碍: {start_dynamic} "
         f"({dynamic_mode})\n"
+        f"  可移动物块:  "
+        f"{movable_pose if start_movable else '未加载'}\n"
         f"  Gazebo 相机: {start_camera}\n"
         f"  ⚠ 需要 ros-humble-gazebo-plugins（libgazebo_ros_camera.so）\n"
         f"  ⚠ 终端里用 ros2 命令前先执行: export ROS_DOMAIN_ID={domain_id}; "
         f"export ROS_LOCALHOST_ONLY="
         f"{'1' if _parse_bool(localhost_only, True) else '0'}\n"
+        "  移动物块: ros2 run litearm_d435i_perception move_block.py "
+        "0.25 0.10 0.20\n"
         "  验收: ros2 run litearm_d435i_perception d435i_probe.py\n"
         "────────────────────────────────────────")))
     return actions

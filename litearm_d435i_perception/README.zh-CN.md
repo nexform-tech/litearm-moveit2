@@ -3,7 +3,8 @@
 `litearm_d435i_perception` 在 Gazebo Classic 中模拟一台固定外置的 Intel
 RealSense D435i，用真实深度点云为机械臂 + LiteGrip 夹爪构建环境。点云经
 MoveIt 2 的 Octomap 进入 PlanningScene，支持位姿/关节目标规划、执行中障碍
-更新后的“停 → 复检 → 重规划”，以及可选的 Gazebo 动态障碍（默认关闭）。
+更新后的“停 → 复检 → 重规划”，并默认提供一个可通过 ROS 接口实时改位的
+演示物块（另有可选的 Gazebo 动态障碍，默认关闭）。
 
 # litearm_d435i_perception
 
@@ -68,7 +69,17 @@ ros2 launch litearm_d435i_perception d435i_avoidance.launch.py \
   gui:=false use_rviz:=false
 ```
 
-默认 `ROS_DOMAIN_ID=42`、`ROS_LOCALHOST_ONLY=1`。别的终端要 export 同样的值。
+默认 `ROS_DOMAIN_ID=42`、`ROS_LOCALHOST_ONLY=1`。**每个新终端**（运行
+`ros2 topic`、`ros2 run`、RViz 等）都要先执行：
+
+```bash
+export ROS_DOMAIN_ID=42
+export ROS_LOCALHOST_ONLY=1
+```
+
+否则终端和仿真不在同一个 ROS 域，会表现为
+`Waiting for at least 1 matching subscription(s)...` 一直等待，或
+`✗ 没有节点订阅 /movable_block/target_pose`——节点其实在跑，只是互相看不见。
 
 关键 launch 参数：
 
@@ -80,6 +91,9 @@ ros2 launch litearm_d435i_perception d435i_avoidance.launch.py \
 | `camera_mount_file` | `config/camera_mount.yaml` | 相机安装位姿（Gazebo 与 TF 共用） |
 | `start_camera` | `true` | 插入 Gazebo D435i；接真机/外部相机时设 `false` |
 | `sensor_heartbeat_topic` | `/camera/color/camera_info` | supervisor 判传感器存活用的小消息话题 |
+| `start_movable_block` | `true` | 插入可实时改位的演示物块 |
+| `movable_block_pose` | `0.30 0.55 -0.06` | 物块初始位置 `x y z`（m，world/base_link）；默认在工位外的地面上，相机可见但不挡机械臂 |
+| `movable_block_yaw` | `0.0` | 物块初始绕 Z 轴朝向（rad） |
 | `start_dynamic_obstacle` | `false` | 默认不插入动态障碍；`true` 才插入并驱动 `dynamic_obstacle` |
 | `dynamic_mode` | `sweep` | `sweep` 往复；`once` 走一遍就停 |
 | `dynamic_speed` | `0.20` | m/s |
@@ -130,7 +144,10 @@ ros2 run litearm_d435i_perception acceptance_d435i.sh
 ros2 launch litearm_d435i_perception d435i_avoidance.launch.py \
   gui:=false use_rviz:=false
 
-# 终端 2：同一 ROS_DOMAIN_ID / ROS_LOCALHOST_ONLY
+# 终端 2：先进入与终端 1 相同的 ROS 域
+export ROS_DOMAIN_ID=42
+export ROS_LOCALHOST_ONLY=1
+
 ros2 run litearm_d435i_perception d435i_probe.py
 ```
 
@@ -152,6 +169,63 @@ ros2 run litearm_d435i_perception d435i_probe.py
 路径，验收需要可重复触发。**动态障碍默认关闭**，所以默认跑验收时第 4/5
 步会自动跳过，只覆盖“感知 + 静态位姿”；要看动态重规划，用
 `start_dynamic_obstacle:=true` 启动。
+
+## 可移动物块（默认开启）
+
+启动后工位外的地面上有一个橙红色物块。它只有 visual、没有 collision，
+`<static>true</static>`，由 `movable_block.py` 通过
+`/gazebo/set_entity_state` 改世界位姿；移动后 D435i 立刻在新位置看到它，
+`/camera/depth/color/points`、Octomap 和 `/monitored_planning_scene` 实时更新。
+
+无 GUI（`gui:=false`）时也可以改位置。另开终端，先进入同一个 ROS 域，再执行：
+
+```bash
+export ROS_DOMAIN_ID=42
+export ROS_LOCALHOST_ONLY=1
+
+# 摆到工作台上方（world 与 base_link 在本仿真中重合）
+ros2 run litearm_d435i_perception move_block.py 0.25 0.10 0.20
+
+# 只改位置、顺带绕 Z 轴转 45 度
+ros2 run litearm_d435i_perception move_block.py 0.25 0.10 0.20 --yaw 0.785
+
+# 回初始停车位
+ros2 run litearm_d435i_perception move_block.py --reset
+```
+
+也可以直接用 ROS 接口输入（`PoseStamped` 的 `header.frame_id` 接受
+`world` 或 `base_link`）：
+
+```bash
+# 只改位置：最短写法
+ros2 topic pub --once /movable_block/target_point \
+  geometry_msgs/msg/Point "{x: 0.25, y: 0.10, z: 0.20}"
+
+# 改位置 + 朝向
+ros2 topic pub --once /movable_block/target_pose \
+  geometry_msgs/msg/PoseStamped \
+  "{header: {frame_id: world}, pose: {position: {x: 0.25, y: 0.10, z: 0.20}, orientation: {w: 1.0}}}"
+
+# 回初始位姿
+ros2 service call /movable_block/reset std_srvs/srv/Trigger
+```
+
+查看实时更新：
+
+- 有 RViz 时，打开 Displays 里的「相机点云」（默认关闭以省性能），
+  或直接看 MotionPlanning 的 Scene Geometry：物块移动后 Octomap 里的
+  橙色体素会跟着走；
+- 纯 headless 时，观察 `/camera/depth/color/points` 的 `width/height`
+  或截取一帧，比较物块位置附近的点：
+
+```bash
+ros2 topic hz /camera/depth/color/points
+ros2 topic echo --once /movable_block/pose
+```
+
+物块位置没有范围限制；z 是几何中心，默认停车位在地面上（中心
+`z=-0.06`）。放到工作台面上时中心约 `z=0.02`（台面 `z=-0.04`，半高
+0.06 m）。它出现在 Octomap 后会被 MoveIt 当成障碍物，规划会自动绕开。
 
 ## 动态障碍演示（默认关闭）
 
@@ -184,6 +258,8 @@ ros2 service call /dynamic_obstacle/reset std_srvs/srv/Trigger
 | `spawn_model.py` | 从 SDF/URDF 文件插入 Gazebo；启动顺序里相机/障碍先于机器人 |
 | `camera_tf.py` | `base_link -> camera_link -> *_optical_frame` 静态 TF |
 | `gazebo_robot_description.py` | 只提供 Gazebo 侧 `robot_description` 参数给 `gazebo_ros2_control` |
+| `movable_block.py` | 驱动默认可改位物块；`/movable_block/target_pose`、`/movable_block/target_point`、`/movable_block/reset` |
+| `move_block.py` | 命令行客户端：`move_block.py X Y Z [--yaw R]` / `--reset` |
 | `dynamic_obstacle.py` | 通过 `/gazebo/set_entity_state` 驱动方块；`/dynamic_obstacle/enable`、`/dynamic_obstacle/reset` |
 | `d435i_supervisor.py` | 位姿/关节目标、规划执行、剩余轨迹复检、停-重规划、失败撤退 |
 | `d435i_probe.py` | 验收探针 |

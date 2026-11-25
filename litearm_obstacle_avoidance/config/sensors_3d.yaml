@@ -20,8 +20,11 @@ synthetic_cloud:
   point_cloud_topic: /synthetic_cloud
   max_range: 3.0
   point_subsample: 1
-  # 传感器侧安全裕度：每个占据栅格向外膨胀 padding_offset（米），
-  # 再按 padding_scale 缩放。这是避障余量最直接的一层。
+  # 本体自滤形状的膨胀：机器人（及已加入场景的碰撞体）的碰撞形状先按
+  # padding_scale 缩放，再每侧加 padding_offset（米）；落在膨胀形状内的
+  # 点被当成本体丢弃，既不进 Octomap 也不向后打空闲射线。
+  # 注意：这是"过滤哪些点"的裕度，不是 Octomap 占据栅格膨胀，也不等于
+  # 规划间隙。调大会滤掉贴着手臂的薄障碍，调小则手臂表面噪点会粘在地图上。
   padding_offset: 0.03
   padding_scale: 1.0
   max_update_rate: 2.0

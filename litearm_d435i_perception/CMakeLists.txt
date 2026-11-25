@@ -12,6 +12,8 @@ install(PROGRAMS
   scripts/camera_tf.py
   scripts/spawn_model.py
   scripts/gazebo_robot_description.py
+  scripts/movable_block.py
+  scripts/move_block.py
   scripts/dynamic_obstacle.py
   scripts/d435i_supervisor.py
   scripts/d435i_probe.py

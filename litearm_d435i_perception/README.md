@@ -5,7 +5,8 @@ Gazebo Classic. It builds the environment around the seven-axis arm and
 LiteGrip gripper from a real depth point cloud, which enters the MoveIt
 PlanningScene through an Octomap. The package plans and executes pose and joint
 goals, re-checks the remaining trajectory when obstacles change during
-execution, and offers an optional Gazebo moving obstacle (disabled by default).
+execution, and ships a demo block that can be repositioned at runtime through
+ROS (plus an optional Gazebo moving obstacle, disabled by default).
 
 # litearm_d435i_perception
 
@@ -72,8 +73,18 @@ ros2 launch litearm_d435i_perception d435i_avoidance.launch.py \
   gui:=false use_rviz:=false
 ```
 
-The defaults are `ROS_DOMAIN_ID=42` and `ROS_LOCALHOST_ONLY=1`. Export the same
-values in every other terminal.
+The defaults are `ROS_DOMAIN_ID=42` and `ROS_LOCALHOST_ONLY=1`. In **every new
+terminal** (`ros2 topic`, `ros2 run`, RViz, ...), export them first:
+
+```bash
+export ROS_DOMAIN_ID=42
+export ROS_LOCALHOST_ONLY=1
+```
+
+Otherwise the terminal and the simulation are in different ROS domains. The
+symptoms are `Waiting for at least 1 matching subscription(s)...` hanging
+forever, or `no node subscribes to /movable_block/target_pose`; the nodes are
+running, they just cannot see each other.
 
 Key launch arguments:
 
@@ -85,6 +96,9 @@ Key launch arguments:
 | `camera_mount_file` | `config/camera_mount.yaml` | Camera mount pose, shared by Gazebo and TF |
 | `start_camera` | `true` | Insert the Gazebo D435i; set `false` for a real or external camera |
 | `sensor_heartbeat_topic` | `/camera/color/camera_info` | Small topic the supervisor uses to decide whether the sensor is alive |
+| `start_movable_block` | `true` | Insert the block that can be repositioned at runtime |
+| `movable_block_pose` | `0.30 0.55 -0.06` | Initial block position `x y z` (m, world/base_link); the default is on the floor outside the workcell, visible to the camera but out of the arm's way |
+| `movable_block_yaw` | `0.0` | Initial block yaw around Z (rad) |
 | `start_dynamic_obstacle` | `false` | Insert and drive `dynamic_obstacle`; off by default |
 | `dynamic_mode` | `sweep` | `sweep` moves back and forth; `once` stops at the end |
 | `dynamic_speed` | `0.20` | m/s |
@@ -142,7 +156,10 @@ Or step by step:
 ros2 launch litearm_d435i_perception d435i_avoidance.launch.py \
   gui:=false use_rviz:=false
 
-# Terminal 2: same ROS_DOMAIN_ID / ROS_LOCALHOST_ONLY
+# Terminal 2: enter the same ROS domain as terminal 1 first
+export ROS_DOMAIN_ID=42
+export ROS_LOCALHOST_ONLY=1
+
 ros2 run litearm_d435i_perception d435i_probe.py
 ```
 
@@ -167,6 +184,65 @@ necessarily cross the current planned path, and acceptance needs a repeatable
 trigger. **The dynamic obstacle is off by default**, so the default acceptance
 run skips steps 4 and 5 and covers only perception plus static pose goals. To
 exercise dynamic replanning, start with `start_dynamic_obstacle:=true`.
+
+## Repositionable demo block (enabled by default)
+
+After launch there is an orange-red block on the floor outside the workcell.
+It is visual-only and `<static>true</static>`; `movable_block.py` changes its
+world pose through `/gazebo/set_entity_state`. Once it moves, the D435i sees it
+at the new position and `/camera/depth/color/points`, the Octomap, and
+`/monitored_planning_scene` update in real time.
+
+No GUI is needed (`gui:=false` works). In another terminal, enter the same ROS
+domain first, then run:
+
+```bash
+export ROS_DOMAIN_ID=42
+export ROS_LOCALHOST_ONLY=1
+
+# Place it above the workbench (world and base_link coincide in this sim)
+ros2 run litearm_d435i_perception move_block.py 0.25 0.10 0.20
+
+# Change position and yaw by 45 degrees
+ros2 run litearm_d435i_perception move_block.py 0.25 0.10 0.20 --yaw 0.785
+
+# Return to the initial park pose
+ros2 run litearm_d435i_perception move_block.py --reset
+```
+
+You can also use the ROS interfaces directly (`PoseStamped.header.frame_id`
+accepts `world` or `base_link`):
+
+```bash
+# Position only: shortest form
+ros2 topic pub --once /movable_block/target_point \
+  geometry_msgs/msg/Point "{x: 0.25, y: 0.10, z: 0.20}"
+
+# Position and orientation
+ros2 topic pub --once /movable_block/target_pose \
+  geometry_msgs/msg/PoseStamped \
+  "{header: {frame_id: world}, pose: {position: {x: 0.25, y: 0.10, z: 0.20}, orientation: {w: 1.0}}}"
+
+# Back to the initial pose
+ros2 service call /movable_block/reset std_srvs/srv/Trigger
+```
+
+To watch the update:
+
+- With RViz, enable the "相机点云" display (off by default to save CPU), or
+  watch MotionPlanning's Scene Geometry: the Octomap voxels follow the block;
+- Headless: observe the cloud dimensions or sample a frame and compare points
+  around the block:
+
+```bash
+ros2 topic hz /camera/depth/color/points
+ros2 topic echo --once /movable_block/pose
+```
+
+There is no position range check; `z` is the geometric center. The default
+park pose sits on the floor (center `z=-0.06`). To put it on the workbench top
+(`z=-0.04`) with a 0.12 m cube, use center `z≈0.02`. Once the block enters the
+Octomap, MoveIt treats it as an obstacle and plans around it.
 
 ## Dynamic obstacle demo (disabled by default)
 
@@ -200,6 +276,8 @@ executing, or use the deterministic injection in `d435i_probe.py`.
 | `spawn_model.py` | Insert an SDF/URDF file into Gazebo; the start sequence inserts the camera and obstacle before the robot |
 | `camera_tf.py` | Static TF from `base_link` to `camera_link` and the two optical frames |
 | `gazebo_robot_description.py` | Serve the Gazebo-side `robot_description` parameter to `gazebo_ros2_control` |
+| `movable_block.py` | Drive the default repositionable block; `/movable_block/target_pose`, `/movable_block/target_point`, `/movable_block/reset` |
+| `move_block.py` | Command-line client: `move_block.py X Y Z [--yaw R]` / `--reset` |
 | `dynamic_obstacle.py` | Drive the block through `/gazebo/set_entity_state`; `/dynamic_obstacle/enable`, `/dynamic_obstacle/reset` |
 | `d435i_supervisor.py` | Pose and joint goals, planning and execution, remaining-trajectory re-check, stop-and-replan, retreat on failure |
 | `d435i_probe.py` | Acceptance probe |
