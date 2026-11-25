@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!--
+  litearm_litegrip_wrist_gazebo.urdf.xacro — 腕装 D435i 的 Gazebo 侧组合模型。
+
+  内容 = 旧包的 Gazebo 组合模型（几何 + GazeboSystem + world 固定基座）
+         + 腕装相机 link / TF + <gazebo reference="camera_link"> 传感器。
+
+  launch 调用时必须传 camera_add_gazebo_sensor:=true，否则只加 link、不加
+  传感器，点云不会出现。相机挂点、安装位姿由 wrist_camera.xacro 的 xacro
+  arg 控制（camera_parent_link / camera_mount_xyz / camera_mount_rpy）。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="litearm">
+  <xacro:include filename="$(find litearm_obstacle_avoidance)/config/litearm_litegrip_gazebo.urdf.xacro"/>
+  <xacro:include filename="$(find litearm_d435i_perception)/config/wrist_camera.xacro"/>
+</robot>

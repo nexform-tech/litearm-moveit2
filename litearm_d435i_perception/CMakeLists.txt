@@ -17,6 +17,8 @@ install(PROGRAMS
   scripts/dynamic_obstacle.py
   scripts/d435i_supervisor.py
   scripts/d435i_probe.py
+  scripts/wrist_scan.py
+  scripts/wrist_runtime_probe.py
   scripts/acceptance_d435i.sh
   DESTINATION lib/${PROJECT_NAME}
 )

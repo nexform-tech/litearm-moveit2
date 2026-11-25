@@ -1,0 +1,88 @@
+<?xml version="1.0"?>
+<!--
+  d435i_camera.sdf — Gazebo Classic 里的固定外置 D435i（RGB-D）模型。
+
+  这不是 Intel 官方模型，而是按 D435i 的关键参数搭的仿真替身：
+    · 深度：424x240 @ 10 Hz，水平 FOV 87°，0.1–4.0 m
+    · 彩色：424x240 @ 5 Hz，水平 FOV 69°
+    · 两个传感器都在 camera_link 上，沿 +X 看出去
+    · 点云/图像的话题名刻意对齐真实 realsense2_camera：
+        /fixed_camera/depth/color/points
+        /fixed_camera/depth/color/depth/image_raw
+        /fixed_camera/color/image_raw
+        /fixed_camera/color/camera_info
+      这样接真机时只需停掉本模型、启动 realsense2_camera，MoveIt 侧
+      sensors_3d.yaml 不用改。
+
+  关键约定
+  ========
+  gazebo_plugins 的相机插件把点云按**光学坐标系**（x 右、y 下、z 前）输出，
+  但 frame_id 直接取 <frame_name>。因此这里填 *_optical_frame，并由
+  scripts/camera_tf.py 发布 camera_link -> *_optical_frame 的
+  rpy(-pi/2, 0, -pi/2) 固定变换。若填成 camera_link，点云会被 TF 当成
+  机体系坐标，整张地图会绕相机转 90°。
+-->
+<sdf version="1.6">
+  <model name="fixed_d435i">
+    <static>true</static>
+
+    <link name="camera_link">
+      <!-- 机身：D435i 约 90 x 25 x 25 mm；长轴沿 +X（镜头朝向）。 -->
+      <visual name="body">
+        <geometry>
+          <box><size>0.090 0.025 0.025</size></box>
+        </geometry>
+        <material>
+          <ambient>0.15 0.15 0.17 1</ambient>
+          <diffuse>0.22 0.22 0.25 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- ── 深度传感器 ─────────────────────────────────────────────── -->
+      <sensor type="depth" name="fixed_d435i_depth">
+        <always_on>true</always_on>
+        <update_rate>10</update_rate>
+        <camera>
+          <horizontal_fov>1.518436</horizontal_fov>
+          <image>
+            <width>424</width>
+            <height>240</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.10</near>
+            <far>4.0</far>
+          </clip>
+        </camera>
+        <plugin filename="libgazebo_ros_camera.so" name="fixed_d435i_depth_plugin">
+          <camera_name>fixed_camera/depth/color</camera_name>
+          <frame_name>fixed_camera_depth_optical_frame</frame_name>
+          <min_depth>0.10</min_depth>
+          <max_depth>4.0</max_depth>
+        </plugin>
+      </sensor>
+
+      <!-- ── 彩色传感器 ─────────────────────────────────────────────── -->
+      <sensor type="camera" name="fixed_d435i_color">
+        <always_on>true</always_on>
+        <update_rate>5</update_rate>
+        <camera>
+          <horizontal_fov>1.204277</horizontal_fov>
+          <image>
+            <width>424</width>
+            <height>240</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.10</near>
+            <far>4.0</far>
+          </clip>
+        </camera>
+        <plugin filename="libgazebo_ros_camera.so" name="fixed_d435i_color_plugin">
+          <camera_name>fixed_camera/color</camera_name>
+          <frame_name>fixed_camera_color_optical_frame</frame_name>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>

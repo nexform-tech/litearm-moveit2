@@ -1,0 +1,146 @@
+<?xml version="1.0"?>
+<!--
+  wrist_camera.xacro — 腕装 D435i 的 link / TF / Gazebo 传感器定义。
+
+  只在腕装扫描链路里被引用，固定外置相机的 d435i_avoidance.launch.py 不受影响：
+
+      litearm_litegrip_wrist.urdf.xacro         MoveIt + robot_state_publisher
+      litearm_litegrip_wrist_gazebo.urdf.xacro  Gazebo（追加 <gazebo> 传感器）
+
+  安装约定
+  ========
+  camera_link 的 +X 就是镜头视线方向（和 models/d435i_camera.sdf 一致），
+  通过固定关节挂在 ee_link 上。默认安装位姿：
+
+      xyz = (0.0, 0.075, 0.02)      # ee_link 系，偏到夹爪 +Y 侧
+      rpy = (0, 0, 0)               # 相机 +X = ee_link +X（侧视，垂直于工具轴）
+
+  ⚠ 为什么不把视线装成工具轴方向（rpy = 0 -pi/2 0）：
+    本臂 joint4 只能单向弯（[-3.07, 0.02]），在 z≈0.42–0.52 的扫描高度上，
+    “工具轴朝下”这个姿态 KDL 全种子无解（实测 0/43）。侧视安装让顶视/环视
+    时工具轴保持水平，同一组 9 个视角 IK 9/9 可达。换成工具轴方向会直接
+    导致所有环视视角 IK 失败，不是调参能绕过的。
+
+  LiteGrip 手指在 ee_link 的 ±Y 约 3 cm 内，偏 7.5 cm 后镜头不会被手指占满；
+  相机机体沿 ee_link +X，夹爪沿 +Z，两者近似垂直，夹爪基本不进视野。
+  真实机械结构请按实测改 camera_mount_xyz / camera_mount_rpy，launch 不用改；
+  改完先用 scan_dry_run:=true 验证视角可达性。
+
+  光学帧
+  ======
+  和固定外置相机同一约定：camera_link +X 为视线，optical frame 用
+  rpy(-pi/2, 0, -pi/2) 转成 REP 103（x 右、y 下、z 前）。点云 header 的
+  frame_id 取 optical frame，因此 PointCloudOctomapUpdater 和
+  sensors_3d.yaml 完全复用，不需要改配置。
+
+  ⚠ Gazebo 侧 robot 的 link/joint 同名冲突由 launch 里的
+    _rename_gazebo_links() 处理：ee_link 会被改成 gz_ee_link，本文件里
+    相机固定关节的 parent 会被一并改写；camera_link 不参与改名。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="litearm">
+
+  <xacro:arg name="camera_parent_link" default="ee_link"/>
+  <xacro:arg name="camera_mount_xyz" default="0.0 0.075 0.02"/>
+  <xacro:arg name="camera_mount_rpy" default="0 0 0"/>
+  <!-- 只有 Gazebo 侧 wrapper 打开；MoveIt/RSP 侧关掉，避免重复插件 -->
+  <xacro:arg name="camera_add_gazebo_sensor" default="false"/>
+
+  <!-- ── 相机机体（D435i 约 90 x 25 x 25 mm，长轴沿视线 +X）── -->
+  <link name="camera_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.090 0.025 0.025"/>
+      </geometry>
+      <material name="d435i_body">
+        <color rgba="0.20 0.20 0.23 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.090 0.025 0.025"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.070"/>
+      <!-- 0.09 x 0.025 x 0.025 m 盒体，绕质心 -->
+      <inertia ixx="7.3e-06" ixy="0" ixz="0"
+               iyy="5.1e-05" iyz="0"
+               izz="5.1e-05"/>
+    </inertial>
+  </link>
+
+  <joint name="d435i_wrist_mount_joint" type="fixed">
+    <parent link="$(arg camera_parent_link)"/>
+    <child link="camera_link"/>
+    <origin xyz="$(arg camera_mount_xyz)" rpy="$(arg camera_mount_rpy)"/>
+  </joint>
+
+  <!-- ── 光学帧：REP 103，供点云/TF 使用 ── -->
+  <link name="camera_depth_optical_frame"/>
+  <joint name="camera_depth_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_depth_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+  </joint>
+
+  <link name="camera_color_optical_frame"/>
+  <joint name="camera_color_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_color_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+  </joint>
+
+  <!-- ── Gazebo Classic 传感器（只在 Gazebo wrapper 中打开）──
+       参数与 models/d435i_camera.sdf 保持一致：424x240、深度 10 Hz、
+       彩色 5 Hz、87° 深度 FOV、0.1–4.0 m。 -->
+  <xacro:if value="$(arg camera_add_gazebo_sensor)">
+    <gazebo reference="camera_link">
+      <sensor type="depth" name="d435i_wrist_depth">
+        <always_on>true</always_on>
+        <update_rate>10</update_rate>
+        <camera>
+          <horizontal_fov>1.518436</horizontal_fov>
+          <image>
+            <width>424</width>
+            <height>240</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.10</near>
+            <far>4.0</far>
+          </clip>
+        </camera>
+        <plugin filename="libgazebo_ros_camera.so" name="d435i_wrist_depth_plugin">
+          <camera_name>camera/depth/color</camera_name>
+          <frame_name>camera_depth_optical_frame</frame_name>
+          <min_depth>0.10</min_depth>
+          <max_depth>4.0</max_depth>
+        </plugin>
+      </sensor>
+
+      <sensor type="camera" name="d435i_wrist_color">
+        <always_on>true</always_on>
+        <update_rate>5</update_rate>
+        <camera>
+          <horizontal_fov>1.204277</horizontal_fov>
+          <image>
+            <width>424</width>
+            <height>240</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.10</near>
+            <far>4.0</far>
+          </clip>
+        </camera>
+        <plugin filename="libgazebo_ros_camera.so" name="d435i_wrist_color_plugin">
+          <camera_name>camera/color</camera_name>
+          <frame_name>camera_color_optical_frame</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+
+</robot>

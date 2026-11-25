@@ -1,0 +1,54 @@
+# sensors_3d_wrist.yaml — 腕装 + 固定外置两台 D435i 融进同一张 Octomap。
+#
+# 数据流
+# ======
+#   固定外置 D435i  /fixed_camera/depth/color/points
+#   腕装 D435i      /camera/depth/color/points
+#        -> PointCloudOctomapUpdater × 2
+#        -> Octomap (frame_id=base_link)
+#        -> /monitored_planning_scene
+#        -> OMPL / wrist_scan 运行时复检
+#
+# 两台相机互补
+# ============
+# 固定相机从工位外侧连续看整个工作台，解决腕装相机“只看到当前视角”的
+# 盲区；腕装相机负责补固定相机被物体/机械臂挡住的背面和近场。两边都用
+# ShapeMask 自滤波（move_group 注册的机器人碰撞体），不会把手臂写进地图。
+#
+# 命名空间
+# ========
+# 固定相机用 /fixed_camera/... 与 fixed_camera_* 帧，避免和腕装相机的
+# /camera/...、camera_* 帧冲突。别和旧的 d435i_avoidance.launch.py 同时
+# 跑（旧 launch 的固定相机占用 /camera/...）。
+#
+# 性能
+# ====
+# 两路 424x240、subsample=2、Octomap 10 Hz / 0.02 m。比单相机多一路
+# ShapeMask 和插入开销；集成显卡上如果 RTF 下降，先把 point_subsample
+# 调到 3–4，或把固定相机的 max_update_rate 降到 5 Hz。
+sensors:
+  - wrist_points
+  - fixed_points
+
+wrist_points:
+  sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
+  point_cloud_topic: /camera/depth/color/points
+  max_range: 3.0
+  point_subsample: 2
+  padding_offset: 0.01
+  padding_scale: 1.0
+  max_update_rate: 10.0
+  filtered_cloud_topic: /camera/depth/color/points_filtered
+
+fixed_points:
+  sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
+  point_cloud_topic: /fixed_camera/depth/color/points
+  max_range: 3.0
+  point_subsample: 2
+  padding_offset: 0.01
+  padding_scale: 1.0
+  max_update_rate: 10.0
+  filtered_cloud_topic: /fixed_camera/depth/color/points_filtered
+
+octomap_frame: base_link
+octomap_resolution: 0.02

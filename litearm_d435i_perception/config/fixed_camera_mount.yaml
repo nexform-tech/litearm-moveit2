@@ -1,0 +1,20 @@
+# fixed_camera_mount.yaml — 固定外置 D435i（eye-to-hand）的安装位姿。
+#
+# 腕装扫描 launch 同时运行固定外置相机和腕装相机，两者把点云融进同一张
+# base_link Octomap。为了与腕装相机（/camera/...、camera_*_optical_frame）
+# 区分，固定相机使用独立的帧名和话题命名空间：
+#
+#   点云： /fixed_camera/depth/color/points
+#   彩色： /fixed_camera/color/image_raw
+#   帧：   fixed_camera_link -> fixed_camera_*_optical_frame
+#
+# 位姿与 config/camera_mount.yaml 完全相同：相机在 base_link 前方 1.0 m、
+# 高 0.9 m，向下俯视约 40°，87° 水平 FOV 覆盖整个 0.9 m 工作台。
+frame_id: base_link
+camera_link: fixed_camera_link
+depth_optical_frame: fixed_camera_depth_optical_frame
+color_optical_frame: fixed_camera_color_optical_frame
+
+pose:
+  xyz: [1.00, 0.00, 0.90]
+  rpy: [0.00, 0.70, 3.141592653589793]
