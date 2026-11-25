@@ -199,6 +199,33 @@ def _normalize_gripper_prefix(urdf_text):
     return ET.tostring(root, encoding="unicode")
 
 
+def _freeze_gripper_fingers(urdf_text):
+    """把夹爪两个从动滑块关节改成 fixed，让 Gazebo 与 MoveIt 的指位姿一致。
+
+    Gazebo Classic 不支持 URDF 的 <mimic>：gripper_slide_joint_right/left 在
+    仿真里是自由滑动的被动关节，会停在任意位置（实测一指在完全张开位、另一指
+    在闭合位）。MoveIt / RSP 则按 mimic 从 gripper_opening_joint 的状态推算，
+    两指都被摆到 q=0。自滤波用的是 MoveIt 位姿，相机看到的是 Gazebo 位姿，
+    一个行程（stroke≈4.3 cm）的偏差会让手指和它的包络点云落进 Octomap，变成
+    跟着机械臂走的幽灵障碍。
+
+    本仿真不驱动夹爪（避免与臂的运动混淆），所以直接把两指钉在 q=0：两个
+    解析器看到的是同一个固定位姿，不再依赖 Gazebo 的被动关节物理状态。
+    总控关节 gripper_opening_joint 保留（有 state interface，也留在 SRDF 的
+    gripper 组里），但不再驱动几何。
+    """
+    root = ET.fromstring(urdf_text)
+    frozen = ("gripper_slide_joint_right", "gripper_slide_joint_left")
+    for joint in root.findall("joint"):
+        if joint.get("name") not in frozen:
+            continue
+        joint.set("type", "fixed")
+        for tag in ("mimic", "limit", "dynamics", "axis"):
+            for child in joint.findall(tag):
+                joint.remove(child)
+    return ET.tostring(root, encoding="unicode")
+
+
 def _rename_gazebo_links(urdf_text):
     root = ET.fromstring(urdf_text)
     link_names = {elem.get("name") for elem in root.findall("link")}
@@ -349,8 +376,11 @@ def _declare_arguments(share):
                               description="每个视角停稳采集秒数"),
         DeclareLaunchArgument("scan_velocity_scaling", default_value="0.20"),
         DeclareLaunchArgument("scan_acceleration_scaling", default_value="0.20"),
-        DeclareLaunchArgument("scan_planning_time", default_value="6.0"),
-        DeclareLaunchArgument("scan_plan_attempts", default_value="12"),
+        # 规划预算刻意压小：move_group 的规划/service 回调会阻塞它内部的 TF
+        # 回调，单次规划越长、TF buffer 停摆越久（10 s 缓存过期后点云整帧丢
+        # 自滤波）。2 s × 4 次把一次阻塞控制在 ~8 s 内，失败就交给扫描的重试。
+        DeclareLaunchArgument("scan_planning_time", default_value="2.0"),
+        DeclareLaunchArgument("scan_plan_attempts", default_value="4"),
         DeclareLaunchArgument("scan_ik_seeds", default_value="7",
                               description="每个视角最多尝试的 IK 种子数"),
         DeclareLaunchArgument(
@@ -411,6 +441,13 @@ def _declare_arguments(share):
             "scan_cloud_topic",
             default_value="/camera/depth/color/points_filtered",
             description="覆盖率统计用的自滤波点云"),
+        DeclareLaunchArgument(
+            "shape_tf_cache_wait", default_value="1.0",
+            description="ShapeMask 自滤波查找 TF 的等待时间（s）。MoveIt 默认 "
+                        "0.05 s，但点云 updater 和 PlanningSceneMonitor 各有一份 "
+                        "TF buffer，负载下会差几百毫秒到 1 s：查不到的 link 被静默"
+                        "跳过，整帧手臂点云写进 Octomap 变成幽灵障碍。实测 1.0 s "
+                        "能消掉 Missing transform；如果地图更新明显变慢可降到 0.3"),
         DeclareLaunchArgument("ros_domain_id", default_value=DEFAULT_DOMAIN_ID),
         DeclareLaunchArgument("ros_localhost_only", default_value="true"),
     ]
@@ -474,6 +511,7 @@ def _launch_setup(context, *_args, **_kwargs):
     raw = re.sub(r"<!--.*?-->", "", raw, flags=re.S)
     raw = re.sub(r"<\?xml[^>]*\?>", "", raw)
     raw = _normalize_gripper_prefix(raw)
+    raw = _freeze_gripper_fingers(raw)
     raw = _resolve_package_uris(raw)
     gazebo_description = _add_missing_inertia(_rename_gazebo_links(raw))
     robot_description = " ".join(gazebo_description.split())
@@ -512,12 +550,33 @@ def _launch_setup(context, *_args, **_kwargs):
     rsp_description = subprocess.check_output(
         ["xacro", moveit_xacro] + xacro_args, text=True)
     rsp_description = _normalize_gripper_prefix(rsp_description)
+    # 与 Gazebo 侧同样钉住两指，自滤波形状才和相机看到的真实几何重合。
+    rsp_description = _freeze_gripper_fingers(rsp_description)
     rsp_description = " ".join(rsp_description.split())
 
     # builder 展开 xacro 时同样会带上未加前缀的夹爪 link；统一用后处理后的
     # 描述，保证 robot_state_publisher / move_group / RViz 看到同一份模型。
     moveit_config.robot_description = {
         "robot_description": rsp_description}
+
+    # ── ShapeMask 自滤波的 TF 等待时间 ──
+    # PointCloudOctomapUpdater 按点云 header.stamp 逐个 link 查 TF，把机器人
+    # 碰撞形状摆到相机坐标系里做自滤波。MoveIt 默认只等 0.05 s；Gazebo 双
+    # 相机 + gzclient + RViz 时 TF 常比相机时间戳慢几十到几百毫秒，查不到
+    # 的 link 会被静默跳过（日志只在 ShapeMask 里报 “Missing transform for
+    # shape ...”，不中断回调），于是机械臂自己的点被当作环境写入 Octomap。
+    # 手臂一动，旧位姿的点就留在原地变成幽灵障碍：起始状态碰撞、所有规划
+    # 失败、RViz 的 Plan and Execute 直接放弃执行。放宽等待时间可以覆盖
+    # TF 抖动；cast 只在传感器回调里发生，不影响规划本身。
+    shape_wait = float(resolve("shape_tf_cache_wait"))
+    try:
+        moveit_config.joint_limits.setdefault(
+            "robot_description_planning", {})[
+                "shape_transform_cache_lookup_wait_time"] = shape_wait
+    except (AttributeError, TypeError) as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "无法写入 shape_transform_cache_lookup_wait_time：joint_limits "
+            f"配置结构异常（{exc}）") from exc
 
     environment = [
         SetEnvironmentVariable("ROS_DOMAIN_ID", env["ROS_DOMAIN_ID"]),
@@ -721,8 +780,8 @@ def _launch_setup(context, *_args, **_kwargs):
                 "max_sensor_age": 2.5,
                 "validity_check_period": 0.8,
                 "validity_stride": 1,
-                "planning_time": 4.0,
-                "plan_attempts": 8,
+                "planning_time": 2.0,
+                "plan_attempts": 4,
                 "max_replans": 8,
             }],
         ))
@@ -810,6 +869,7 @@ def _launch_setup(context, *_args, **_kwargs):
         f"（{fixed_mount_file if start_fixed else '未启动'}）\n"
         f"  点云话题:     {point_cloud_topics}\n"
         f"  传感器配置:   {sensors_file}\n"
+        f"  自滤波 TF 等待: {resolve('shape_tf_cache_wait')} s\n"
         f"  扫描:         targets={resolve('scan_targets')} "
         f"radius={resolve('scan_radius')} "
         f"elevations={resolve('scan_elevations')} "

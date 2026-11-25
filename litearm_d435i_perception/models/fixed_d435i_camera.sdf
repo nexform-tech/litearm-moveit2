@@ -3,8 +3,10 @@
   d435i_camera.sdf — Gazebo Classic 里的固定外置 D435i（RGB-D）模型。
 
   这不是 Intel 官方模型，而是按 D435i 的关键参数搭的仿真替身：
-    · 深度：424x240 @ 10 Hz，水平 FOV 87°，0.1–4.0 m
-    · 彩色：424x240 @ 5 Hz，水平 FOV 69°
+    · 深度：320x180 @ 5 Hz，水平 FOV 87°，0.1–4.0 m
+    · 彩色：320x180 @ 5 Hz，水平 FOV 69°
+    · （真机 D435i 是 424x240；这里降分辨率/帧率是为了让 Gazebo 的点云
+      转换吞吐跟得上，理由见深度传感器里的注释）
     · 两个传感器都在 camera_link 上，沿 +X 看出去
     · 点云/图像的话题名刻意对齐真实 realsense2_camera：
         /fixed_camera/depth/color/points
@@ -41,12 +43,17 @@
       <!-- ── 深度传感器 ─────────────────────────────────────────────── -->
       <sensor type="depth" name="fixed_d435i_depth">
         <always_on>true</always_on>
-        <update_rate>10</update_rate>
+        <!-- 5 Hz / 320x180：D435i 的点云分辨率本来是 424x240，但 Gazebo
+             Classic 的点云转换吞吐跟不上。实测双相机 424x240@10 Hz 时
+             /.../points 只有 ~1.8 Hz，时间戳落后仿真时钟数秒，MoveIt 的
+             TF/自滤波回调被拖住，手臂点云会漏进 Octomap。320x180@5 Hz 的
+             数据量约为原来的 1/4，深度图/点云/相机信息都能跟上。 -->
+        <update_rate>5</update_rate>
         <camera>
           <horizontal_fov>1.518436</horizontal_fov>
           <image>
-            <width>424</width>
-            <height>240</height>
+            <width>320</width>
+            <height>180</height>
             <format>R8G8B8</format>
           </image>
           <clip>
@@ -69,8 +76,8 @@
         <camera>
           <horizontal_fov>1.204277</horizontal_fov>
           <image>
-            <width>424</width>
-            <height>240</height>
+            <width>320</width>
+            <height>180</height>
             <format>R8G8B8</format>
           </image>
           <clip>

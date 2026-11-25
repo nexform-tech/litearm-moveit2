@@ -207,6 +207,31 @@ def _normalize_gripper_prefix(urdf_text):
     return ET.tostring(root, encoding="unicode")
 
 
+def _freeze_gripper_fingers(urdf_text):
+    """把夹爪两个从动滑块关节改成 fixed，让 Gazebo 与 MoveIt 的指位姿一致。
+
+    Gazebo Classic 不支持 URDF 的 <mimic>：gripper_slide_joint_right/left 在
+    仿真里是自由滑动的被动关节，会停在任意位置（实测一指完全张开、另一指
+    闭合）。MoveIt / RSP 按 mimic 从 gripper_opening_joint 推算，两指都被摆
+    到 q=0。自滤波用 MoveIt 位姿、相机看到 Gazebo 位姿，一个行程
+    （stroke≈4.3 cm）的偏差会让手指和包络点云落进 Octomap 变成幽灵障碍。
+
+    本仿真不驱动夹爪，直接把两指钉在 q=0：两个解析器看到同一个固定位姿，
+    不再依赖 Gazebo 被动关节的物理状态。总控关节保留 state interface，
+    但不再驱动几何。
+    """
+    root = ET.fromstring(urdf_text)
+    frozen = ("gripper_slide_joint_right", "gripper_slide_joint_left")
+    for joint in root.findall("joint"):
+        if joint.get("name") not in frozen:
+            continue
+        joint.set("type", "fixed")
+        for tag in ("mimic", "limit", "dynamics", "axis"):
+            for child in joint.findall(tag):
+                joint.remove(child)
+    return ET.tostring(root, encoding="unicode")
+
+
 def _rename_gazebo_links(urdf_text):
     """只给 Gazebo 侧 URDF 的冲突 link 加前缀。
 
@@ -309,6 +334,12 @@ def _declare_arguments(share, old_share):
                               description="夹爪包络外扩量（m）"),
         DeclareLaunchArgument("log_level", default_value="info"),
         DeclareLaunchArgument(
+            "shape_tf_cache_wait", default_value="1.0",
+            description="ShapeMask 自滤波查找 TF 的等待时间（s）。MoveIt 默认 "
+                        "0.05 s，但点云 updater 和 PlanningSceneMonitor 各有一份 "
+                        "TF buffer，负载下会差几百毫秒：查不到的 link 被静默跳过，"
+                        "整帧手臂点云写进 Octomap 变成幽灵障碍"),
+        DeclareLaunchArgument(
             "extra_gazebo_args", default_value="",
             description="追加给 gzserver 的参数；默认 world 已用 WorldPlugin "
                         "加载 libgazebo_ros_state.so"),
@@ -362,6 +393,7 @@ def _launch_setup(context, *_args, **_kwargs):
     raw = re.sub(r"<!--.*?-->", "", raw, flags=re.S)
     raw = re.sub(r"<\?xml[^>]*\?>", "", raw)
     raw = _normalize_gripper_prefix(raw)
+    raw = _freeze_gripper_fingers(raw)
     raw = _resolve_package_uris(raw)
     gazebo_description = _add_missing_inertia(_rename_gazebo_links(raw))
     robot_description = " ".join(gazebo_description.split())
@@ -399,12 +431,21 @@ def _launch_setup(context, *_args, **_kwargs):
          f"gripper_envelope_margin:={resolve('gripper_envelope_margin')}"],
         text=True)
     rsp_description = _normalize_gripper_prefix(rsp_description)
+    rsp_description = _freeze_gripper_fingers(rsp_description)
     rsp_description = " ".join(rsp_description.split())
 
     # builder 展开 xacro 时同样会带上未加前缀的夹爪 link；统一用后处理后的
     # 描述，保证 robot_state_publisher / move_group / RViz 看到同一份模型。
     moveit_config.robot_description = {
         "robot_description": rsp_description}
+
+    # ShapeMask 自滤波按点云时间戳查 TF；默认 0.05 s 等待在 Gazebo + GUI +
+    # RViz 的负载下会让部分 link 查不到而被静默跳过，手臂点云进入 Octomap
+    # 变成幽灵障碍。放宽等待时间覆盖 TF 抖动。
+    shape_wait = float(resolve("shape_tf_cache_wait"))
+    moveit_config.joint_limits.setdefault(
+        "robot_description_planning", {})[
+            "shape_transform_cache_lookup_wait_time"] = shape_wait
 
     environment = [
         SetEnvironmentVariable("ROS_DOMAIN_ID", env["ROS_DOMAIN_ID"]),

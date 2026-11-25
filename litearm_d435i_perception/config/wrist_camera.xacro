@@ -93,18 +93,21 @@
   </joint>
 
   <!-- ── Gazebo Classic 传感器（只在 Gazebo wrapper 中打开）──
-       参数与 models/d435i_camera.sdf 保持一致：424x240、深度 10 Hz、
-       彩色 5 Hz、87° 深度 FOV、0.1–4.0 m。 -->
+       参数与 models/fixed_d435i_camera.sdf 保持一致：320x180、深度 5 Hz、
+       彩色 5 Hz、87° 深度 FOV、0.1–4.0 m。真机是 424x240@10 Hz；这里降
+       分辨率/帧率是为了让 Gazebo Classic 的点云转换吞吐跟得上（双相机
+       424x240@10 Hz 时点云只有 ~1.8 Hz、时间戳落后数秒，MoveIt 的自滤波
+       TF 查询会被拖垮）。 -->
   <xacro:if value="$(arg camera_add_gazebo_sensor)">
     <gazebo reference="camera_link">
       <sensor type="depth" name="d435i_wrist_depth">
         <always_on>true</always_on>
-        <update_rate>10</update_rate>
+        <update_rate>5</update_rate>
         <camera>
           <horizontal_fov>1.518436</horizontal_fov>
           <image>
-            <width>424</width>
-            <height>240</height>
+            <width>320</width>
+            <height>180</height>
             <format>R8G8B8</format>
           </image>
           <clip>
@@ -126,8 +129,8 @@
         <camera>
           <horizontal_fov>1.204277</horizontal_fov>
           <image>
-            <width>424</width>
-            <height>240</height>
+            <width>320</width>
+            <height>180</height>
             <format>R8G8B8</format>
           </image>
           <clip>
