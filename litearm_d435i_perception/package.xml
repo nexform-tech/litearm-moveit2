@@ -13,6 +13,17 @@
   <license>BSD-3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>eigen3_cmake_module</buildtool_depend>
+
+  <!-- cloud_envelope_filter：MoveIt 碰撞模型 + ShapeMask 的 C++ 包络过滤 -->
+  <depend>rclcpp</depend>
+  <depend>tf2</depend>
+  <depend>visualization_msgs</depend>
+  <depend>interactive_markers</depend>
+  <depend>moveit_core</depend>
+  <depend>moveit_ros_planning</depend>
+  <depend>moveit_ros_perception</depend>
+  <depend>eigen</depend>
 
   <!-- 组合模型（臂 + 夹爪）、SRDF、静态场景、Gazebo 控制器与 world 都复用旧包 -->
   <exec_depend>litearm_obstacle_avoidance</exec_depend>
@@ -54,12 +65,12 @@
   <exec_depend>controller_manager_msgs</exec_depend>
   <exec_depend>builtin_interfaces</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend>
+  <depend>sensor_msgs</depend>
   <exec_depend>sensor_msgs_py</exec_depend>
   <exec_depend>shape_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
-  <exec_depend>tf2_ros</exec_depend>
+  <depend>tf2_ros</depend>
   <exec_depend>tf2_ros_py</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

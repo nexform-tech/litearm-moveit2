@@ -4,6 +4,8 @@
 # ========
 #   realsense2_camera
 #     /camera/depth/color/points   (PointCloud2, frame=camera_depth_optical_frame)
+#     -> cloud_envelope_filter     (可选 3cm 机器人包络过滤，RViz 标记切换)
+#     -> /camera/depth/color/points_envelope
 #     -> PointCloudOctomapUpdater  (本文件)
 #     -> Octomap (frame=base_link)
 #     -> /monitored_planning_scene
@@ -44,7 +46,10 @@ sensors:
 
 d435i_points:
   sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
-  point_cloud_topic: /camera/depth/color/points
+  # cloud_envelope_filter 的输出：默认直通；在 RViz 里点击 /cloud_envelope_filter
+  # 的绿/灰标记后，再额外滤掉机器人碰撞模型 3 cm 内的点（内置 2 cm + 1 cm）。
+  # 如果关掉 start_cloud_envelope_filter，把这里改回 /camera/depth/color/points。
+  point_cloud_topic: /camera/depth/color/points_envelope
   max_range: 2.5
   point_subsample: 2
   padding_offset: 0.02

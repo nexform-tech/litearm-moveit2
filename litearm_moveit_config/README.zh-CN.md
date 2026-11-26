@@ -109,6 +109,9 @@ marker 和 RViz。机械臂模型不含夹爪。launch 不启动 Gazebo，也不
 | `calibration_frame` | `camera_color_optical_frame` | 手眼 JSON 对应的相机帧 |
 | `shape_tf_cache_wait` | `0.5` | ShapeMask 查 TF 的等待时间（秒） |
 | `allow_move_group_execution` | `false` | 是否允许 move_group/RViz Execute 直接执行；真机默认只走 supervisor |
+| `start_cloud_envelope_filter` | `true` | 启动 3cm 机器人包络过滤节点（内置 2cm + 额外 1cm） |
+| `cloud_envelope_padding` | `0.03` | 包络过滤的总 padding；0.03 = 2cm 内置 + 1cm 额外 |
+| `cloud_envelope_enabled` | `false` | 启动时是否已开启；运行时在 RViz 点击标记切换 |
 | `scene_file` | 空 | 可选的静态场景 YAML |
 | `ros_domain_id` | `42` | 所有节点使用的 ROS 域 |
 | `ros_localhost_only` | `true` | 只在本机发现 |
@@ -124,6 +127,15 @@ marker 和 RViz。机械臂模型不含夹爪。launch 不启动 Gazebo，也不
 `allow_move_group_execution=false` 时 RViz Execute 和
 `moveit_probe.py --execute` 都不能绕过 supervisor；需要手动调试时显式
 加 `allow_move_group_execution:=true`。
+
+包络过滤节点把 `cloud_envelope_filter` 的输出
+`/camera/depth/color/points_envelope` 作为 Octomap 输入。在 RViz 的
+`/cloud_envelope_filter` 交互标记里点击绿色/灰色小球：绿色=开启（滤掉
+机器人碰撞模型 3cm 内的点），灰色=关闭（直通，仅保留 MoveIt 自带 2cm）。
+这是模型包络，不是手动框选线缆；如果线缆离模型超过 3cm，这个按钮不会
+把它滤掉，需要 cable_guard 包络或手动区域过滤。关掉
+`start_cloud_envelope_filter` 时，要同时把 `sensors_3d_real.yaml` 的
+`point_cloud_topic` 改回 `/camera/depth/color/points`。
 
 传感器调参在 `config/sensors_3d_real.yaml`。`padding_offset` 是自滤波的
 膨胀量，不是规划安全裕度。外参准确时首轮 `0.02` m 可用；手臂表面漏进

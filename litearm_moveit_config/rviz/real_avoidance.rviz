@@ -105,6 +105,15 @@ Visualization Manager:
       Show Descriptions: true
       Show Visual Aids: true
       Value: true
+    - Class: rviz_default_plugins/InteractiveMarkers
+      Enable Transparency: true
+      Enabled: true
+      Interactive Markers Namespace: /cloud_envelope_filter
+      Name: 包络过滤
+      Show Axes: false
+      Show Descriptions: true
+      Show Visual Aids: true
+      Value: true
     - Class: moveit_rviz_plugin/MotionPlanning
       Name: MotionPlanning
       Planned Path:

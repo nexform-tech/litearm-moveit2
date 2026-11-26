@@ -329,6 +329,13 @@ supervisor 接口：
 `camera_mount.yaml`；`camera_mount.yaml` 和 `camera_tf.py` 留在 Gazebo
 仿真路径。
 
+真机 launch 还会启动 C++ 节点 `cloud_envelope_filter`：它把原始
+`/camera/depth/color/points` 变成 `/camera/depth/color/points_envelope`
+再给 Octomap。默认直通；在 RViz 的 `/cloud_envelope_filter` 交互标记里
+点击绿色/灰色小球切换“机器人碰撞模型周围 3cm”包络（内置 2cm + 额外
+1cm）。绿色开、灰色关；这是模型包络，不是手动框选线缆；线缆离模型超过
+3cm 时需要 cable_guard 或手动区域过滤。
+
 **包里的手眼文件只对应这一台相机和这一个安装位置。** 它对应 D435i
 序列号 243222074636 和 2026-11-26 的安装。换机器人、换相机、换安装位置，
 或相机被碰过，都需要重新标定；原始文件的彩色内参是错的，必须用

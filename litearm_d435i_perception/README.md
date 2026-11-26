@@ -354,6 +354,14 @@ The real-arm avoidance launch now lives in `litearm_moveit_config`:
 `litearm_moveit_config/config/handeye/`, not `camera_mount.yaml`.
 `camera_mount.yaml` and `camera_tf.py` remain the Gazebo path.
 
+The real launch also starts the C++ `cloud_envelope_filter` node: it turns
+`/camera/depth/color/points` into `/camera/depth/color/points_envelope` for the
+Octomap. It is pass-through by default; click the green/gray sphere in the
+`/cloud_envelope_filter` interactive marker to toggle a 3 cm envelope around
+the robot collision model (2 cm built-in + 1 cm extra). Green = on, gray = off.
+This is a model envelope, not a manual cable selection; if the cable is more
+than 3 cm from the model, use cable_guard or a manual region filter.
+
 **The included hand-eye files are a reference for one camera and one mount.**
 They were measured for the D435i with serial 243222074636 and the 2026-11-26
 mount. A different robot, camera, mount, or a bumped camera needs a new

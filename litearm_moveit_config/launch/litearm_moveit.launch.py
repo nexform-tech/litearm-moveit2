@@ -116,6 +116,25 @@ def _declare_arguments():
                                           "Execute). The real-avoidance launch sets this "
                                           "false so execution must go through the "
                                           "supervisor; planning services stay available"),
+        DeclareLaunchArgument("start_cloud_envelope_filter", default_value="false",
+                              description="Start cloud_envelope_filter: an extra robot "
+                                          "collision-model envelope on the point cloud "
+                                          "(3 cm total = the 2 cm MoveIt self-filter plus "
+                                          "1 cm), toggled from an RViz interactive marker"),
+        DeclareLaunchArgument("cloud_envelope_padding", default_value="0.03",
+                              description="ShapeMask padding used by cloud_envelope_filter "
+                                          "(m); 0.03 = 2 cm MoveIt self-filter + 1 cm extra"),
+        DeclareLaunchArgument("cloud_envelope_enabled", default_value="false",
+                              description="Initial state of the cloud envelope filter; the "
+                                          "RViz marker toggles it at runtime"),
+        DeclareLaunchArgument("cloud_envelope_input_topic",
+                              default_value="/camera/depth/color/points",
+                              description="Raw point cloud into cloud_envelope_filter"),
+        DeclareLaunchArgument("cloud_envelope_output_topic",
+                              default_value="/camera/depth/color/points_envelope",
+                              description="Filtered point cloud for sensors_3d"),
+        DeclareLaunchArgument("cloud_envelope_frame", default_value="base_link",
+                              description="Robot model / marker frame for cloud_envelope_filter"),
         DeclareLaunchArgument("rviz_config", default_value="",
                               description="RViz config file; empty = the package's "
                                           "rviz/moveit.rviz"),
@@ -205,6 +224,40 @@ def _launch_setup(context, *_args, **_kwargs):
         arguments=["--ros-args", "--log-level", resolve("log_level")],
     ))
 
+    start_cloud_filter = _is_true(resolve("start_cloud_envelope_filter"))
+    cloud_enabled = _is_true(resolve("cloud_envelope_enabled"))
+    try:
+        cloud_padding = float(resolve("cloud_envelope_padding"))
+    except ValueError:
+        cloud_padding = 0.03
+    if not math.isfinite(cloud_padding) or cloud_padding <= 0.0:
+        cloud_padding = 0.03
+    cloud_input = resolve("cloud_envelope_input_topic").strip() or \
+        "/camera/depth/color/points"
+    cloud_output = resolve("cloud_envelope_output_topic").strip() or \
+        "/camera/depth/color/points_envelope"
+    cloud_frame = resolve("cloud_envelope_frame").strip() or "base_link"
+    if start_cloud_filter:
+        actions.append(Node(
+            package="litearm_d435i_perception",
+            executable="cloud_envelope_filter",
+            name="cloud_envelope_filter",
+            output="screen",
+            additional_env=env,
+            parameters=[
+                moveit_config.robot_description,
+                moveit_config.robot_description_semantic,
+                {
+                    "input_topic": cloud_input,
+                    "output_topic": cloud_output,
+                    "base_frame": cloud_frame,
+                    "marker_frame": cloud_frame,
+                    "padding": cloud_padding,
+                    "enabled": cloud_enabled,
+                },
+            ],
+        ))
+
     if use_rviz:
         rviz_config = resolve("rviz_config").strip() or os.path.join(
             moveit_share, "rviz", "moveit.rviz")
@@ -225,6 +278,12 @@ def _launch_setup(context, *_args, **_kwargs):
             ],
         ))
 
+    if start_cloud_filter:
+        cloud_filter_text = (
+            f"on ({cloud_padding:.3f} m, "
+            f"{'enabled' if cloud_enabled else 'disabled until toggled in RViz'})")
+    else:
+        cloud_filter_text = "off"
     actions.insert(0, LogInfo(msg=(
         "──────── litearm MoveIt ────────\n"
         f"  control stack: {'started here' if start_control else 'expected to be running'}\n"
@@ -233,6 +292,7 @@ def _launch_setup(context, *_args, **_kwargs):
         f"  ShapeMask TF wait: {shape_wait:.2f} s\n"
         f"  move_group execution: "
         f"{'allowed (RViz Execute can drive the arm)' if allow_move_group_execution else 'disabled (use the supervisor)'}\n"
+        f"  cloud envelope filter: {cloud_filter_text}\n"
         "  ⚠ This launch fixes the ROS domain; to use ros2 commands or the RViz\n"
         "    GUI from your own terminal, run:\n"
         f"        {_isolation_hint(domain_id, localhost_only)}\n"

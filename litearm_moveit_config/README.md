@@ -119,6 +119,9 @@ Pass `start_control:=false` when a control stack already runs,
 | `calibration_frame` | `camera_color_optical_frame` | frame the hand-eye JSON uses |
 | `shape_tf_cache_wait` | `0.5` | ShapeMask TF lookup wait, in seconds |
 | `allow_move_group_execution` | `false` | let move_group/RViz Execute drive the arm; the real launch defaults to supervisor-only |
+| `start_cloud_envelope_filter` | `true` | start the 3 cm robot-envelope filter (2 cm built-in + 1 cm extra) |
+| `cloud_envelope_padding` | `0.03` | total envelope padding; 0.03 = 2 cm built-in + 1 cm extra |
+| `cloud_envelope_enabled` | `false` | start with the filter on; toggle the RViz marker at runtime |
 | `scene_file` | empty | optional static scene YAML |
 | `ros_domain_id` | `42` | ROS domain for every node |
 | `ros_localhost_only` | `true` | keep discovery on this machine |
@@ -135,6 +138,16 @@ read `octomap_age` from `/d435i_supervisor/status` together with the actual
 0 to disable the check. With `allow_move_group_execution=false`, neither
 RViz Execute nor `moveit_probe.py --execute` can bypass the supervisor; pass
 `allow_move_group_execution:=true` only for a deliberate bring-up test.
+
+The envelope filter feeds `/camera/depth/color/points_envelope` into the
+Octomap. Click the green/gray sphere in the `/cloud_envelope_filter`
+interactive marker: green = on (points within 3 cm of the robot collision
+model are removed), gray = off (pass-through, only MoveIt's built-in 2 cm).
+This is a model envelope, not a manual cable selection; if the cable sits more
+than 3 cm from the model, use a cable_guard envelope or a manual region filter.
+When `start_cloud_envelope_filter` is false, also change
+`point_cloud_topic` in `sensors_3d_real.yaml` back to
+`/camera/depth/color/points`.
 
 The sensor tuning is in `config/sensors_3d_real.yaml`. `padding_offset` is the
 self-filter inflation, not the planning clearance. The first run at `0.02` m

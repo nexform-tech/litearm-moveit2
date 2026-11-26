@@ -9,7 +9,8 @@
     3. RealSense D435i      realsense2_camera/rs_launch.py（可选）
     4. 静态 TF              base_link -> camera_link（读手眼标定 JSON）
     5. d435i_supervisor     规划 / 执行 / 剩余轨迹复检 / 取消 / 重规划
-    6. 已知静态场景（可选）  scene_builder.py + scene_real.yaml
+    6. cloud_envelope_filter 可切换的 3cm 机器人包络点云过滤
+    7. 已知静态场景（可选）  scene_builder.py + scene_real.yaml
 
 不启动
 ======
@@ -52,6 +53,9 @@
       需要手动调试时才显式打开；
     * supervisor 默认检查起始状态偏差（FixStartStateCollision 改起点会
       安全停）和实际跟踪误差（超过 0.1 rad 安全停）；
+    * 包络过滤：RViz 的 /cloud_envelope_filter 交互标记里点击绿/灰小球，
+      切换“机器人碰撞模型 3cm 包络”（内置 2cm + 额外 1cm）；绿色开、
+      灰色关。它是模型包络，不是手动框选；线缆离模型超过 3cm 时无效；
     * 相机避障不是安全认证功能，不能替代急停和固件保护。
 """
 
@@ -254,6 +258,17 @@ def _declare_arguments():
         DeclareLaunchArgument("scene_file", default_value="",
                               description="Optional known static scene YAML; empty = "
                                           "Octomap only"),
+        DeclareLaunchArgument("start_cloud_envelope_filter", default_value="true",
+                              description="Start cloud_envelope_filter: an extra 1 cm "
+                                          "robot collision-model envelope (3 cm total "
+                                          "with MoveIt's 2 cm self-filter), toggled by "
+                                          "clicking the green/gray marker in RViz"),
+        DeclareLaunchArgument("cloud_envelope_padding", default_value="0.03",
+                              description="cloud_envelope_filter ShapeMask padding (m); "
+                                          "0.03 = 2 cm built-in + 1 cm extra"),
+        DeclareLaunchArgument("cloud_envelope_enabled", default_value="false",
+                              description="Start with the 3 cm envelope filter enabled; "
+                                          "the RViz marker toggles it at runtime"),
         DeclareLaunchArgument("allow_move_group_execution", default_value="false",
                               description="Allow move_group /move_action and RViz "
                                           "Execute to drive the arm. Default false: "
@@ -315,6 +330,10 @@ def _launch_setup(context, *_args, **_kwargs):
     controller_wait = _float(resolve("controller_wait_timeout"), 5.0)
     exec_timeout_scale = _float(resolve("execution_timeout_scale"), 1.5)
     exec_timeout_margin = _float(resolve("execution_timeout_margin"), 5.0)
+    start_cloud_filter = _parse_bool(
+        resolve("start_cloud_envelope_filter"), True)
+    cloud_enabled = _parse_bool(resolve("cloud_envelope_enabled"), False)
+    cloud_padding = _float(resolve("cloud_envelope_padding"), 0.03)
     allow_move_group_execution = _parse_bool(
         resolve("allow_move_group_execution"), False)
     validity_period = _float(resolve("validity_check_period"), 0.5)
@@ -379,6 +398,11 @@ def _launch_setup(context, *_args, **_kwargs):
             "shape_tf_cache_wait": f"{shape_wait:.3f}",
             "allow_move_group_execution":
                 "true" if allow_move_group_execution else "false",
+            "start_cloud_envelope_filter":
+                "true" if start_cloud_filter else "false",
+            "cloud_envelope_padding": f"{cloud_padding:.3f}",
+            "cloud_envelope_enabled":
+                "true" if cloud_enabled else "false",
             "rviz_config": rviz_config,
             "log_level": log_level,
             "ros_domain_id": domain_id,
@@ -531,7 +555,8 @@ def _launch_setup(context, *_args, **_kwargs):
         f"  控制栈: {'本 launch 启动' if start_control else '假设已在别处运行'}\n"
         f"  相机: {'启动' if start_camera else '未启动'} "
         f"({camera_namespace.rstrip('/')}/{camera_name}), "
-        f"点云 /camera/depth/color/points\n"
+        f"点云 /camera/depth/color/points -> 包络过滤 "
+        f"{'开 (3cm, 默认关)' if start_cloud_filter else '关'}\n"
         f"  标定: {calibration_file}\n"
         f"       {calibration_text}\n"
         f"  标定帧: {calibration_frame} -> 发布 {base_frame} -> {camera_link_frame}\n"
