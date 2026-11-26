@@ -42,6 +42,7 @@ component talks to the real board, so a launch either has an arm on the other en
 of the USB cable or its hardware component fails to configure.
 """
 
+import math
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -102,6 +103,16 @@ def _declare_arguments():
                                           "hardware is enabled, so a bring-up after a fault "
                                           "stays a single command; false lets the fault stop "
                                           "the launch instead"),
+        DeclareLaunchArgument("sensors_3d_file", default_value="",
+                              description="Optional sensors_3d YAML for move_group "
+                                          "(point cloud -> Octomap); empty = no 3D sensor"),
+        DeclareLaunchArgument("shape_tf_cache_wait", default_value="0.05",
+                              description="ShapeMask TF lookup wait in seconds; raise it "
+                                          "on a loaded real machine so the arm does not "
+                                          "leak into the Octomap"),
+        DeclareLaunchArgument("rviz_config", default_value="",
+                              description="RViz config file; empty = the package's "
+                                          "rviz/moveit.rviz"),
         DeclareLaunchArgument("log_level", default_value="info",
                               description="move_group log level"),
         DeclareLaunchArgument("ros_domain_id", default_value=DEFAULT_DOMAIN_ID,
@@ -129,12 +140,29 @@ def _launch_setup(context, *_args, **_kwargs):
     # The MoveIt side expands the same URDF the control stack does, so the port
     # argument has to reach both; a mismatch would not error, it would just leave
     # move_group describing a robot the controller_manager is not running.
-    moveit_config = (
+    builder = (
         MoveItConfigsBuilder("litearm", package_name="litearm_moveit_config")
         .robot_description(mappings={"litearm_port": port})
-        .planning_pipelines(pipelines=["ompl"])
-        .to_moveit_configs()
     )
+    sensors_3d_file = resolve("sensors_3d_file").strip()
+    if sensors_3d_file:
+        builder = builder.sensors_3d(file_path=sensors_3d_file)
+    moveit_config = builder.planning_pipelines(
+        pipelines=["ompl"]).to_moveit_configs()
+
+    # ShapeMask 自滤波按点云时间戳查 TF；真机负载下 0.05 s 默认值可能不够，
+    # 查不到的 link 会被静默跳过，整帧手臂点云进入 Octomap 变成幽灵障碍。
+    # 0 = 保留 MoveIt 默认，不写这个参数。
+    try:
+        shape_wait = float(resolve("shape_tf_cache_wait"))
+    except ValueError:
+        shape_wait = 0.05
+    if not math.isfinite(shape_wait) or shape_wait < 0.0:
+        shape_wait = 0.05
+    if shape_wait > 0.0:
+        moveit_config.joint_limits.setdefault(
+            "robot_description_planning", {})[
+                "shape_transform_cache_lookup_wait_time"] = shape_wait
 
     actions = []
 
@@ -163,10 +191,12 @@ def _launch_setup(context, *_args, **_kwargs):
     ))
 
     if use_rviz:
+        rviz_config = resolve("rviz_config").strip() or os.path.join(
+            moveit_share, "rviz", "moveit.rviz")
         actions.append(Node(
             package="rviz2",
             executable="rviz2",
-            arguments=["-d", os.path.join(moveit_share, "rviz", "moveit.rviz")],
+            arguments=["-d", rviz_config],
             output="log",
             additional_env=env,
             # RViz's MoveIt plugin needs these parameter groups itself; move_group's
@@ -184,6 +214,8 @@ def _launch_setup(context, *_args, **_kwargs):
         "──────── litearm MoveIt ────────\n"
         f"  control stack: {'started here' if start_control else 'expected to be running'}\n"
         f"  port: {port or '(auto-discovery, VID:PID 1d50:606f)'}\n"
+        f"  3D sensor: {sensors_3d_file or 'none'}\n"
+        f"  ShapeMask TF wait: {shape_wait:.2f} s\n"
         "  ⚠ This launch fixes the ROS domain; to use ros2 commands or the RViz\n"
         "    GUI from your own terminal, run:\n"
         f"        {_isolation_hint(domain_id, localhost_only)}\n"

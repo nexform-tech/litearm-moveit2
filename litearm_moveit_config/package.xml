@@ -32,6 +32,25 @@
   <exec_depend>xacro</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+
+  <!-- 真机 D435i 避障 launch：相机驱动与标定 TF -->
+  <exec_depend>realsense2_camera</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>interactive_markers</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>builtin_interfaces</exec_depend>
+  <!-- 注意：launch 还会运行 litearm_d435i_perception 的 supervisor 和
+       litearm_obstacle_avoidance 的 scene_builder。这两个包已经反向依赖
+       本包，不能在这里再写 exec_depend，否则 colcon 报依赖环。它们在同一
+       workspace 里安装，运行时仍可被发现。 -->
 
   <!-- tools/compute_collision_matrix.py 的运行时依赖（只在重新生成碰撞矩阵时需要） -->
   <exec_depend>python3-numpy</exec_depend>

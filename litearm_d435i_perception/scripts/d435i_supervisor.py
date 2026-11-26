@@ -87,6 +87,11 @@ class D435iSupervisor(Node):
         self.declare_parameter("validity_check_period", 0.5)
         self.declare_parameter("validity_lookahead", 0.4)
         self.declare_parameter("validity_stride", 3)
+        # base_link 是固定基座，和台面/安装板天然接触；规划器按规划组检查
+        # 时不会把它当成可避让碰撞。复检如果检查全部 link，会每个轨迹点都
+        # 判无效，导致取消—重规划—再取消的抖动。默认忽略只涉及 base_link
+        # 的接触；涉及其他 link 的接触仍然照常拦截。
+        self.declare_parameter("ignore_base_link_contacts", True)
 
         # 失败后的低速撤退
         self.declare_parameter("retreat_enabled", True)
@@ -139,6 +144,7 @@ class D435iSupervisor(Node):
         self.last_status_time = 0.0
         self.last_log_key = None
         self.last_log_time = 0.0
+        self.last_base_ignore_log = 0.0
 
         # ── 接口 ──
         self.plan_client = self.create_client(
@@ -629,26 +635,53 @@ class D435iSupervisor(Node):
         request.robot_state.is_diff = False
         request.robot_state.joint_state.name = list(JOINTS)
         request.robot_state.joint_state.position = positions[:len(JOINTS)]
-        request.group_name = ""
+        # 和规划器保持一致：只查规划组，而不是=""（全部 link，包含固定
+        # 的 base_link）。后者会把基座与台面的安装接触误判为路径被挡。
+        request.group_name = str(self.get_parameter("group_name").value)
         future = self.validity_client.call_async(request)
         future.add_done_callback(self._validity_done)
 
     def _validity_done(self, future):
         self.validity_checks += 1
         response = future.result()
-        if response is None or not response.valid:
+        if response is None:
             self.path_invalid = True
-            # 已经确定被挡，不用再查剩余点；尽快取消/重规划。
             self.check_queue = []
-            if response is not None:
-                pairs = [(c.contact_body_1, c.contact_body_2)
-                         for c in response.contacts[:3]]
-                self.get_logger().warning(
-                    f"复检无效: 轨迹点 #{self.current_check_index} "
-                    f"contacts={pairs}")
-            else:
-                self.get_logger().warning(
-                    f"复检服务无响应: 轨迹点 #{self.current_check_index}")
+            self.get_logger().warning(
+                f"复检服务无响应: 轨迹点 #{self.current_check_index}")
+            self._issue_next_validity()
+            return
+        if response.valid:
+            self._issue_next_validity()
+            return
+
+        contacts = list(response.contacts)
+        ignore_base = bool(
+            self.get_parameter("ignore_base_link_contacts").value)
+        relevant = [
+            c for c in contacts
+            if not (ignore_base and "base_link" in
+                    (c.contact_body_1, c.contact_body_2))]
+        if ignore_base and contacts and not relevant:
+            # 只涉及固定 base_link 的接触：规划器按组检查时不算碰撞，复检
+            # 也不能算，否则基座/台面的安装接触会让每个点都“被挡”，造成
+            # 反复取消—重规划。继续检查剩余轨迹点。
+            now = self._now()
+            if now - self.last_base_ignore_log > 10.0:
+                self.last_base_ignore_log = now
+                self.get_logger().info(
+                    "复检忽略 base_link 与场景的固定接触（基座/台面安装面）")
+            self._issue_next_validity()
+            return
+
+        self.path_invalid = True
+        # 已经确定被挡，不用再查剩余点；尽快取消/重规划。
+        self.check_queue = []
+        pairs = [(c.contact_body_1, c.contact_body_2)
+                 for c in contacts[:3]]
+        self.get_logger().warning(
+            f"复检无效: 轨迹点 #{self.current_check_index} "
+            f"contacts={pairs}")
         self._issue_next_validity()
 
     # ── 取消 / 重规划 / 失败 ──
