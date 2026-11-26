@@ -322,6 +322,18 @@ supervisor 接口：
    `d435i_supervisor` 可以原样使用；注意真实 D435i 的近距噪声和
    `padding_offset` 需要按现场重新调。
 
+真机避障 launch 现在在 `litearm_moveit_config`：
+`litearm_real_avoidance.launch.py` 使用
+`litearm_moveit_config/config/handeye/` 里的手眼 JSON，不再用
+`camera_mount.yaml`；`camera_mount.yaml` 和 `camera_tf.py` 留在 Gazebo
+仿真路径。
+
+**包里的手眼文件只对应这一台相机和这一个安装位置。** 它对应 D435i
+序列号 243222074636 和 2026-11-26 的安装。换机器人、换相机、换安装位置，
+或相机被碰过，都需要重新标定；原始文件的彩色内参是错的，必须用
+`_fixed.json` 或重新标定。流程见
+[`../litearm_moveit_config/README.zh-CN.md`](../litearm_moveit_config/README.zh-CN.md)。
+
 当前包的固定外置假设是 `base_link` 不随臂运动。若以后改成腕部安装，
 Octomap 的 `octomap_frame` 仍应填固定的 `base_link`（或 `world`），
 不要填相机 link。

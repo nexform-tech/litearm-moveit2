@@ -331,6 +331,29 @@ firmware latches the fault again and ENABLE fails with a message that names it. 
 `clear_faults:=false` when you want a latched fault to stop the launch — after a crash,
 for instance, so you can inspect the arm before anything is enabled.
 
+### Real-machine D435i avoidance
+
+The D435i avoidance stack for the real arm is in `litearm_moveit_config`:
+
+```bash
+ros2 launch litearm_moveit_config litearm_real_avoidance.launch.py
+```
+
+It starts the direct-USB control stack, MoveIt, and the RealSense driver
+without Gazebo, and runs the supervisor that rechecks the remaining
+trajectory. The arm model has no gripper.
+
+**The included hand-eye files are a reference, not a portable calibration.**
+They were measured for the D435i with serial 243222074636 and the camera mount
+used on 2026-11-26. The hand-eye transform is a physical measurement: another
+robot, another camera, another mount, or a bumped camera needs a new
+calibration. Reusing the same cell still needs a point-cloud/robot-model
+check. The original `handeye_eye_to_hand_TSAI_20261126_102300.json` used the
+depth/IR intrinsics for color images and is about 15 cm off; use the
+`_fixed.json` file or recalibrate. See
+[`litearm_moveit_config/README.md`](litearm_moveit_config/README.md) for the
+procedure and the launch arguments.
+
 ## Reaching the stack from another terminal
 
 Both launch files pin the ROS domain to 42 and enable localhost-only discovery,

@@ -347,6 +347,18 @@ so they are documented here:
    `litearm_moveit_config`). `d435i_supervisor` works unchanged. Note that the
    real D435i's near-range noise and `padding_offset` need retuning on site.
 
+The real-arm avoidance launch now lives in `litearm_moveit_config`:
+`litearm_real_avoidance.launch.py` uses the hand-eye JSON in
+`litearm_moveit_config/config/handeye/`, not `camera_mount.yaml`.
+`camera_mount.yaml` and `camera_tf.py` remain the Gazebo path.
+
+**The included hand-eye files are a reference for one camera and one mount.**
+They were measured for the D435i with serial 243222074636 and the 2026-11-26
+mount. A different robot, camera, mount, or a bumped camera needs a new
+calibration; the original file's color intrinsics are wrong, and the
+`_fixed.json` file or a new calibration must be used. See
+[`../litearm_moveit_config/README.md`](../litearm_moveit_config/README.md).
+
 This package assumes a fixed external camera where `base_link` does not move
 with the arm. If you later mount the camera on the wrist, keep the Octomap
 `octomap_frame` at the fixed `base_link` (or `world`), not at the camera link.

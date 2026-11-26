@@ -311,6 +311,26 @@ ls /dev/ttyACM*            # 应看到 /dev/ttyACM0
 帧的时候，并且会打一条 WARNING；如果成因还在，固件会重新置位，ENABLE 会带着原因报错。
 想让锁存故障**拦住启动**（例如刚出过事故、想先看清机械臂状态）就加 `clear_faults:=false`。
 
+### 真机 D435i 避障
+
+真机 D435i 避障栈在 `litearm_moveit_config`：
+
+```bash
+ros2 launch litearm_moveit_config litearm_real_avoidance.launch.py
+```
+
+它不启动 Gazebo，启动直连 USB 控制栈、MoveIt 和 RealSense，并运行对剩余
+轨迹复检的 supervisor。机械臂模型不含夹爪。
+
+**包里的手眼文件是参考值，不是通用标定。** 它对应 D435i 序列号
+243222074636 和 2026-11-26 的相机安装。手眼变换是物理测量：换机器人、
+换相机、换安装位置，或相机被碰过，都必须重新标定；即使同一工位复用，
+也要做点云/模型重合检查。原始
+`handeye_eye_to_hand_TSAI_20261126_102300.json` 给彩色图用了深度/IR
+内参，平移差约 15 cm；请用 `_fixed.json` 或重新标定。具体流程和 launch
+参数见
+[`litearm_moveit_config/README.zh-CN.md`](litearm_moveit_config/README.zh-CN.md)。
+
 ## 从另一个终端连上这套栈
 
 两个 launch 都把 ROS 域钉在 42 并开启仅本机发现，因此默认终端里什么都看不到，需要先
