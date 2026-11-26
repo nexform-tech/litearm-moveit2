@@ -45,7 +45,13 @@
 ====
     * 首次运行把 velocity_scaling / acceleration_scaling 保持在 0.05~0.1；
     * 物理急停必须在手边，工作区清空；
-    * supervisor 在 /joint_states 或 Octomap 未就绪时拒绝运动；
+    * supervisor 在 /joint_states、深度/彩色 CameraInfo 或 Octomap
+      未就绪/过期时拒绝运动；默认 max_octomap_age=1.5 s；
+    * move_group 的 execute 能力默认关闭（allow_move_group_execution=false），
+      RViz Execute 和 moveit_probe.py --execute 不能绕过 supervisor；
+      需要手动调试时才显式打开；
+    * supervisor 默认检查起始状态偏差（FixStartStateCollision 改起点会
+      安全停）和实际跟踪误差（超过 0.1 rad 安全停）；
     * 相机避障不是安全认证功能，不能替代急停和固件保护。
 """
 
@@ -182,24 +188,78 @@ def _declare_arguments():
                               description="Start goal_marker.py: an RViz 6-DOF goal "
                                           "marker that publishes to the supervisor"),
         DeclareLaunchArgument("retreat_enabled", default_value="false",
-                              description="After max_replans/replan_failed: false = "
-                                          "safe_stop where the arm is; true = low-speed "
-                                          "retreat to retreat_positions (ready)"),
+                              description="After the replan budgets run out: "
+                                          "false = safe_stop where the arm is; true = "
+                                          "low-speed retreat to retreat_positions (ready)"),
         DeclareLaunchArgument("velocity_scaling", default_value="0.08",
                               description="Supervisor velocity scaling; keep 0.05~0.1 "
                                           "for the first real runs"),
         DeclareLaunchArgument("acceleration_scaling", default_value="0.08",
                               description="Supervisor acceleration scaling"),
-        DeclareLaunchArgument("max_state_age", default_value="0.5",
+        DeclareLaunchArgument("sensor_topics",
+                              default_value="/camera/depth/camera_info,"
+                                            "/camera/color/camera_info",
+                              description="Comma-separated CameraInfo topics the "
+                                          "supervisor requires alive; depth and color "
+                                          "both, so a dead depth stream is not hidden "
+                                          "by the color stream"),
+        DeclareLaunchArgument("max_state_age", default_value="0.3",
                               description="Refuse motion when /joint_states is older (s)"),
-        DeclareLaunchArgument("max_sensor_age", default_value="1.0",
-                              description="Refuse motion when CameraInfo is older (s)"),
+        DeclareLaunchArgument("max_sensor_age", default_value="0.5",
+                              description="Refuse motion when any CameraInfo is older (s)"),
+        DeclareLaunchArgument("max_octomap_age", default_value="1.5",
+                              description="Refuse motion when the Octomap timestamp is "
+                                          "older (s); 0 disables the check"),
+        DeclareLaunchArgument("check_current_state", default_value="true",
+                              description="Use the explicit current joint state for "
+                                          "planning and reject a plan whose "
+                                          "trajectory_start was moved by "
+                                          "FixStartStateCollision"),
+        DeclareLaunchArgument("max_start_deviation", default_value="0.05",
+                              description="Max allowed trajectory_start vs current "
+                                          "state deviation (rad)"),
+        DeclareLaunchArgument("max_tracking_error", default_value="0.1",
+                              description="Safe-stop when |actual - nearest trajectory "
+                                          "point| exceeds this (rad); 0 disables"),
+        DeclareLaunchArgument("tracking_check_period", default_value="0.2",
+                              description="Tracking-error check period (s)"),
+        DeclareLaunchArgument("stop_velocity_tolerance", default_value="0.03",
+                              description="Wait for all joint velocities below this "
+                                          "(rad/s) before replanning after a cancel"),
+        DeclareLaunchArgument("stop_wait_timeout", default_value="0.5",
+                              description="Max extra wait (s) for the arm to stop "
+                                          "before replanning anyway"),
+        DeclareLaunchArgument("controller_wait_timeout", default_value="5.0",
+                              description="Safe-stop when the JTC action server does not "
+                                          "appear within this time (s)"),
+        DeclareLaunchArgument("execution_timeout_scale", default_value="1.5",
+                              description="Execution watchdog = trajectory duration * "
+                                          "this + margin; 0 with margin 0 disables"),
+        DeclareLaunchArgument("execution_timeout_margin", default_value="5.0",
+                              description="Execution watchdog margin (s)"),
         DeclareLaunchArgument("validity_check_period", default_value="0.5",
                               description="Remaining-trajectory recheck period (s)"),
+        DeclareLaunchArgument("max_replans", default_value="20",
+                              description="Blocked-path recoveries before giving up; "
+                                          "the budget resets after each recovery "
+                                          "that starts executing"),
+        DeclareLaunchArgument("max_no_path_retries", default_value="3",
+                              description="Consecutive empty plans before the "
+                                          "supervisor declares there is really no path"),
+        DeclareLaunchArgument("replan_budget_reset_on_success",
+                              default_value="true",
+                              description="Reset max_replans after a recovered path "
+                                          "starts executing; false = hard cap per goal"),
         # ── 其他 ──
         DeclareLaunchArgument("scene_file", default_value="",
                               description="Optional known static scene YAML; empty = "
                                           "Octomap only"),
+        DeclareLaunchArgument("allow_move_group_execution", default_value="false",
+                              description="Allow move_group /move_action and RViz "
+                                          "Execute to drive the arm. Default false: "
+                                          "real execution must go through the "
+                                          "supervisor; planning services stay available. "
+                                          "Set true only for a deliberate bring-up test"),
         DeclareLaunchArgument("rviz_config", default_value="",
                               description="RViz config; empty = the perception package's "
                                           "d435i.rviz if installed"),
@@ -236,9 +296,31 @@ def _launch_setup(context, *_args, **_kwargs):
     shape_wait = _float(resolve("shape_tf_cache_wait"), 0.5)
     velocity_scaling = _float(resolve("velocity_scaling"), 0.08)
     acceleration_scaling = _float(resolve("acceleration_scaling"), 0.08)
-    max_state_age = _float(resolve("max_state_age"), 0.5)
-    max_sensor_age = _float(resolve("max_sensor_age"), 1.0)
+    sensor_topics = [topic.strip()
+                     for topic in resolve("sensor_topics").split(",")
+                     if topic.strip()]
+    if not sensor_topics:
+        # 空值不能让 supervisor 收到空列表（rclpy 会把它推断成
+        # BYTE_ARRAY，与声明的 STRING_ARRAY 冲突）；退回彩色心跳。
+        sensor_topics = ["/camera/color/camera_info"]
+    max_state_age = _float(resolve("max_state_age"), 0.3)
+    max_sensor_age = _float(resolve("max_sensor_age"), 0.5)
+    max_octomap_age = _float(resolve("max_octomap_age"), 1.5)
+    check_current_state = _parse_bool(resolve("check_current_state"), True)
+    max_start_deviation = _float(resolve("max_start_deviation"), 0.05)
+    max_tracking_error = _float(resolve("max_tracking_error"), 0.1)
+    tracking_period = _float(resolve("tracking_check_period"), 0.2)
+    stop_tolerance = _float(resolve("stop_velocity_tolerance"), 0.03)
+    stop_wait = _float(resolve("stop_wait_timeout"), 0.5)
+    controller_wait = _float(resolve("controller_wait_timeout"), 5.0)
+    exec_timeout_scale = _float(resolve("execution_timeout_scale"), 1.5)
+    exec_timeout_margin = _float(resolve("execution_timeout_margin"), 5.0)
+    allow_move_group_execution = _parse_bool(
+        resolve("allow_move_group_execution"), False)
     validity_period = _float(resolve("validity_check_period"), 0.5)
+    max_replans = int(_float(resolve("max_replans"), 20))
+    max_no_path_retries = int(_float(resolve("max_no_path_retries"), 3))
+    replan_reset = _parse_bool(resolve("replan_budget_reset_on_success"), True)
     scene_file = resolve("scene_file").strip()
     domain_id = resolve("ros_domain_id").strip() or DEFAULT_DOMAIN_ID
     localhost_only = resolve("ros_localhost_only")
@@ -295,6 +377,8 @@ def _launch_setup(context, *_args, **_kwargs):
             "clear_faults": "true" if clear_faults else "false",
             "sensors_3d_file": sensors_file,
             "shape_tf_cache_wait": f"{shape_wait:.3f}",
+            "allow_move_group_execution":
+                "true" if allow_move_group_execution else "false",
             "rviz_config": rviz_config,
             "log_level": log_level,
             "ros_domain_id": domain_id,
@@ -367,16 +451,28 @@ def _launch_setup(context, *_args, **_kwargs):
                 "use_sim_time": False,
                 "group_name": "litearm_arm",
                 "ee_link": "ee_link",
-                "sensor_topic": "/camera/color/camera_info",
+                "sensor_topics": sensor_topics,
                 "require_sensor": True,
                 "require_octomap": True,
                 "max_state_age": max_state_age,
                 "max_sensor_age": max_sensor_age,
+                "max_octomap_age": max_octomap_age,
+                "check_current_state": check_current_state,
+                "max_start_deviation": max_start_deviation,
+                "max_tracking_error": max_tracking_error,
+                "tracking_check_period": tracking_period,
+                "stop_velocity_tolerance": stop_tolerance,
+                "stop_wait_timeout": stop_wait,
+                "controller_wait_timeout": controller_wait,
+                "execution_timeout_scale": exec_timeout_scale,
+                "execution_timeout_margin": exec_timeout_margin,
                 "velocity_scaling": velocity_scaling,
                 "acceleration_scaling": acceleration_scaling,
                 "planning_time": 4.0,
                 "plan_attempts": 8,
-                "max_replans": 5,
+                "max_replans": max_replans,
+                "max_no_path_retries": max_no_path_retries,
+                "replan_budget_reset_on_success": replan_reset,
                 "validity_check_period": validity_period,
                 "validity_stride": 2,
                 "retreat_enabled": retreat_enabled,
@@ -428,6 +524,8 @@ def _launch_setup(context, *_args, **_kwargs):
                 os.path.expanduser(scene_file))}],
         ))
 
+    tracking_text = (f"{max_tracking_error:.3f} rad"
+                     if max_tracking_error > 0 else "关")
     actions.insert(0, LogInfo(msg=(
         "──────── litearm 真机避障 ────────\n"
         f"  控制栈: {'本 launch 启动' if start_control else '假设已在别处运行'}\n"
@@ -437,9 +535,18 @@ def _launch_setup(context, *_args, **_kwargs):
         f"  标定: {calibration_file}\n"
         f"       {calibration_text}\n"
         f"  标定帧: {calibration_frame} -> 发布 {base_frame} -> {camera_link_frame}\n"
-        f"  Octomap: {sensors_file} (ShapeMask 等待 {shape_wait:.2f} s)\n"
+        f"  Octomap: {sensors_file} (ShapeMask 等待 {shape_wait:.2f} s, "
+        f"地图过期阈值 {max_octomap_age:.2f} s)\n"
         f"  Supervisor: {'启动' if start_supervisor else '未启动'} "
-        f"(velocity={velocity_scaling:.2f}, accel={acceleration_scaling:.2f})\n"
+        f"(velocity={velocity_scaling:.2f}, accel={acceleration_scaling:.2f}, "
+        f"恢复重规划≤{max_replans}, 无路径重试≤{max_no_path_retries})\n"
+        f"  传感器心跳: {', '.join(sensor_topics) or '无'} "
+        f"(状态≤{max_state_age:.2f} s, 相机≤{max_sensor_age:.2f} s)\n"
+        f"  起始状态复检: {'开' if check_current_state else '关'} "
+        f"(起点偏差≤{max_start_deviation:.3f} rad), "
+        f"跟踪误差看门狗: {tracking_text}\n"
+        f"  move_group 执行: "
+        f"{'允许（RViz Execute 可驱动，调试用）' if allow_move_group_execution else '禁止（必须走 supervisor）'}\n"
         f"  Goal marker: {'启动' if start_goal_marker else '未启动'} "
         f"(RViz InteractiveMarkers, namespace /goal_marker)\n"
         f"  失败后: {'低速撤退到 ready' if retreat_enabled else '原地 safe_stop'}\n"

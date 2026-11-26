@@ -115,7 +115,8 @@ VSCode/Firefox）：
   碰撞体做包含判断，点云越密、更新越频繁，`move_group` 越吃 CPU；
 - **RViz + Gazebo GUI** 的场景/点云/图像渲染共用集显；
 - supervisor 之前为了判断传感器存活，订阅并反序列化了整份 `PointCloud2`
-  （Python 每帧几百 KB）；现在改订阅 `/camera/color/camera_info`。
+  （Python 每帧几百 KB）；现在改订阅 CameraInfo 心跳。真机 launch 同时
+  订阅深度和彩色两路（`sensor_topics`），任一停发都会拒绝运动。
 
 如果仍然卡，按顺序试：
 
@@ -455,8 +456,10 @@ margin 兜底。扫描默认**不**清空 Octomap——两台相机从启动起�
 - supervisor 是“停 → 复检 → 重规划”，不是 MoveIt Servo 的实时避障；
   从发现障碍到新轨迹生效有秒级延迟。
 - Octomap 在规划期间仍在更新，OMPL 返回的路径可能被规划后校验判为无效。
-  supervisor 会在 `max_replans` 预算内重试；验收日志里 `replans` 因此可能
-  大于“障碍事件数”，这是预期行为。
+  返回空轨迹时按 `max_no_path_retries` 重试，只有连续这么多次都为空才以
+  “无路径”结束重规划；“被挡恢复”用另一本 `max_replans` 预算，每次恢复
+  开始执行后归零。验收日志里 `replans` 因此可能大于“障碍事件数”，这是
+  预期行为。
 - 点云自滤波只能排除机器人当前位形；快速运动时的拖影可能短时进入地图。
 - `padding_offset` 默认 0.01 m，是为了避免工作台栅格膨胀到机器人底座；
   要更大安全裕度时优先抬工位/降台面，不要只调这个值。

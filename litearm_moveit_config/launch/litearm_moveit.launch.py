@@ -110,6 +110,12 @@ def _declare_arguments():
                               description="ShapeMask TF lookup wait in seconds; raise it "
                                           "on a loaded real machine so the arm does not "
                                           "leak into the Octomap"),
+        DeclareLaunchArgument("allow_move_group_execution", default_value="true",
+                              description="Let move_group execute trajectories "
+                                          "(/move_action, /execute_trajectory, RViz "
+                                          "Execute). The real-avoidance launch sets this "
+                                          "false so execution must go through the "
+                                          "supervisor; planning services stay available"),
         DeclareLaunchArgument("rviz_config", default_value="",
                               description="RViz config file; empty = the package's "
                                           "rviz/moveit.rviz"),
@@ -164,6 +170,15 @@ def _launch_setup(context, *_args, **_kwargs):
             "robot_description_planning", {})[
                 "shape_transform_cache_lookup_wait_time"] = shape_wait
 
+    allow_move_group_execution = _is_true(
+        resolve("allow_move_group_execution"))
+    move_group_parameters = moveit_config.to_dict()
+    # move_group 的 execute 能力开关：false 时 /move_action 和 RViz Execute
+    # 不能直接驱动机器人，但 /plan_kinematic_path、/check_state_validity
+    # 和 supervisor 直接发给 JTC 的 action 不受影响。
+    move_group_parameters["allow_trajectory_execution"] = \
+        allow_move_group_execution
+
     actions = []
 
     if start_control:
@@ -186,7 +201,7 @@ def _launch_setup(context, *_args, **_kwargs):
         executable="move_group",
         output="screen",
         additional_env=env,
-        parameters=[moveit_config.to_dict()],
+        parameters=[move_group_parameters],
         arguments=["--ros-args", "--log-level", resolve("log_level")],
     ))
 
@@ -216,6 +231,8 @@ def _launch_setup(context, *_args, **_kwargs):
         f"  port: {port or '(auto-discovery, VID:PID 1d50:606f)'}\n"
         f"  3D sensor: {sensors_3d_file or 'none'}\n"
         f"  ShapeMask TF wait: {shape_wait:.2f} s\n"
+        f"  move_group execution: "
+        f"{'allowed (RViz Execute can drive the arm)' if allow_move_group_execution else 'disabled (use the supervisor)'}\n"
         "  ⚠ This launch fixes the ROS domain; to use ros2 commands or the RViz\n"
         "    GUI from your own terminal, run:\n"
         f"        {_isolation_hint(domain_id, localhost_only)}\n"

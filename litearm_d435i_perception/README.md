@@ -124,7 +124,9 @@ The planner itself is not the bottleneck. The cost comes from:
   rendering;
 - The supervisor used to subscribe to and deserialize the whole `PointCloud2`
   to check sensor liveness (hundreds of KB per frame in Python). It now
-  subscribes to `/camera/color/camera_info` instead.
+  subscribes to CameraInfo heartbeats instead. The real launch watches both
+  the depth and the color topics (`sensor_topics`), so either stream stopping
+  refuses motion.
 
 If the stack is still slow, try these in order:
 
@@ -497,9 +499,12 @@ views can become unplannable until it is re-observed.
   real-time avoidance. Several seconds can pass between detecting an obstacle
   and executing a new trajectory.
 - The Octomap keeps updating during planning, so a path returned by OMPL may
-  fail the post-planning validation. The supervisor retries within its
-  `max_replans` budget. `replans` in acceptance logs can therefore exceed the
-  number of obstacle events; this is expected.
+  fail the post-planning validation. Empty plans are retried up to
+  `max_no_path_retries`, and only that consecutive-empty-plan budget ends
+  replanning as "no path". Blocked-path recoveries use the separate
+  `max_replans` budget, which resets after each recovery that starts
+  executing. `replans` in acceptance logs can therefore exceed the number of
+  obstacle events; this is expected.
 - Point cloud self-filtering only removes the robot's current configuration.
   Fast motion can leave brief trails in the map.
 - `padding_offset` defaults to 0.01 m so the workbench grid does not inflate

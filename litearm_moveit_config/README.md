@@ -110,14 +110,31 @@ Pass `start_control:=false` when a control stack already runs,
 | `camera_serial` | empty | pick the RealSense by serial |
 | `start_supervisor` | `true` | plan, execute, and recheck the remaining trajectory |
 | `start_goal_marker` | `true` | start the RViz 6-DOF goal marker |
-| `retreat_enabled` | `false` | after `max_replans`, stop in place; `true` retreats to ready |
+| `retreat_enabled` | `false` | after the replan budgets run out, stop in place; `true` retreats to ready |
+| `max_replans` | `20` | blocked-path recoveries; resets after each recovery that starts executing |
+| `max_no_path_retries` | `3` | consecutive empty plans before "no path" is declared |
+| `replan_budget_reset_on_success` | `true` | `false` = hard `max_replans` cap per goal |
 | `velocity_scaling` | `0.08` | supervisor speed; keep 0.05 to 0.1 for first runs |
 | `calibration_file` | the `_fixed.json` file | hand-eye JSON |
 | `calibration_frame` | `camera_color_optical_frame` | frame the hand-eye JSON uses |
 | `shape_tf_cache_wait` | `0.5` | ShapeMask TF lookup wait, in seconds |
+| `allow_move_group_execution` | `false` | let move_group/RViz Execute drive the arm; the real launch defaults to supervisor-only |
 | `scene_file` | empty | optional static scene YAML |
 | `ros_domain_id` | `42` | ROS domain for every node |
 | `ros_localhost_only` | `true` | keep discovery on this machine |
+
+The real launch watches both the depth and the color CameraInfo topics
+(`sensor_topics`) and refuses motion when either stream, `/joint_states`, or
+the Octomap is stale (`max_state_age=0.3`, `max_sensor_age=0.5`,
+`max_octomap_age=1.5`). Planning uses the explicit current joint state and
+rejects a `trajectory_start` that `FixStartStateCollision` moved away from it.
+Execution stops when the actual tracking error exceeds
+`max_tracking_error=0.1` rad. If `stale_octomap` fires on the real machine,
+read `octomap_age` from `/d435i_supervisor/status` together with the actual
+`/monitored_planning_scene` rate before changing `max_octomap_age`; set it to
+0 to disable the check. With `allow_move_group_execution=false`, neither
+RViz Execute nor `moveit_probe.py --execute` can bypass the supervisor; pass
+`allow_move_group_execution:=true` only for a deliberate bring-up test.
 
 The sensor tuning is in `config/sensors_3d_real.yaml`. `padding_offset` is the
 self-filter inflation, not the planning clearance. The first run at `0.02` m
@@ -127,11 +144,16 @@ scene, and the low speed.
 
 The supervisor plans, executes, and rechecks the remaining trajectory after a
 scene update. A blocked point cancels the JTC goal and replans from the current
-state, up to `max_replans` (5). With the default `retreat_enabled=false`, a
-failed replan ends in a `safe_stop` where the arm is; with
-`retreat_enabled:=true`, it retreats to the ready pose at 0.05 scaling.
-`ignore_base_link_contacts` keeps the fixed base/table mounting contact from
-being treated as a moving obstacle.
+state. Two budgets decide when it gives up: `max_replans` (20) counts
+blocked-path recoveries and resets whenever a recovered path starts executing,
+so it caps consecutive failed recoveries rather than the whole goal;
+`max_no_path_retries` (3) counts consecutive plans that return an empty
+trajectory, and only that ends replanning as "no path". Set
+`replan_budget_reset_on_success:=false` for a hard `max_replans` cap per goal.
+With the default `retreat_enabled=false`, giving up ends in a `safe_stop` where
+the arm is; with `retreat_enabled:=true`, it retreats to the ready pose at 0.05
+scaling. `ignore_base_link_contacts` keeps the fixed base/table mounting
+contact from being treated as a moving obstacle.
 
 ## 4. Goal marker and goal tool
 
@@ -161,9 +183,11 @@ ros2 run litearm_moveit_config goal_tool.py \
   --joints 0 0 0 -1.5708 0 0 0
 ```
 
-Use the supervisor paths for execution. The RViz MotionPlanning **Execute**
-button calls move_group directly and bypasses the supervisor's recheck; use
-**Plan** there only to inspect a path.
+Use the supervisor paths for execution. The real launch defaults to
+`allow_move_group_execution=false`, so the RViz MotionPlanning **Execute**
+button and `/move_action` cannot drive the arm; use **Plan** there only to
+inspect a path. Pass `allow_move_group_execution:=true` explicitly when a
+manual bring-up test really needs move_group execution.
 
 ## 5. Safety and known limitations
 

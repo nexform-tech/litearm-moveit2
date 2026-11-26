@@ -100,23 +100,42 @@ marker 和 RViz。机械臂模型不含夹爪。launch 不启动 Gazebo，也不
 | `camera_serial` | 空 | 按序列号选择 RealSense |
 | `start_supervisor` | `true` | 规划、执行并复检剩余轨迹 |
 | `start_goal_marker` | `true` | 启动 RViz 6-DOF 目标 marker |
-| `retreat_enabled` | `false` | `max_replans` 用完后原地停；`true` 则退回 ready |
+| `retreat_enabled` | `false` | 重规划预算用完后原地停；`true` 则退回 ready |
+| `max_replans` | `20` | 被挡恢复次数；每次恢复开始执行后归零 |
+| `max_no_path_retries` | `3` | 连续多少次返回空轨迹才判定“无路径” |
+| `replan_budget_reset_on_success` | `true` | `false` = 每个目标硬上限 `max_replans` |
 | `velocity_scaling` | `0.08` | supervisor 速度；首轮保持 0.05 到 0.1 |
 | `calibration_file` | `_fixed.json` 文件 | 手眼标定 JSON |
 | `calibration_frame` | `camera_color_optical_frame` | 手眼 JSON 对应的相机帧 |
 | `shape_tf_cache_wait` | `0.5` | ShapeMask 查 TF 的等待时间（秒） |
+| `allow_move_group_execution` | `false` | 是否允许 move_group/RViz Execute 直接执行；真机默认只走 supervisor |
 | `scene_file` | 空 | 可选的静态场景 YAML |
 | `ros_domain_id` | `42` | 所有节点使用的 ROS 域 |
 | `ros_localhost_only` | `true` | 只在本机发现 |
+
+真机 launch 默认把传感器心跳设为深度和彩色两路 CameraInfo
+（`sensor_topics`），`max_state_age=0.3`、`max_sensor_age=0.5`、
+`max_octomap_age=1.5`；任一数据源或 Octomap 过期都会拒绝运动。规划显式
+使用当前关节值，并拒绝被 `FixStartStateCollision` 挪动过的起点；执行中
+实际跟踪误差超过 `max_tracking_error=0.1` rad 直接 `safe_stop`。
+如果现场出现 `stale_octomap` 误报，先看 `/d435i_supervisor/status` 里的
+`octomap_age` 和 `/monitored_planning_scene` 的实际频率，再调整
+`max_octomap_age`；设为 0 可关闭该检查。
+`allow_move_group_execution=false` 时 RViz Execute 和
+`moveit_probe.py --execute` 都不能绕过 supervisor；需要手动调试时显式
+加 `allow_move_group_execution:=true`。
 
 传感器调参在 `config/sensors_3d_real.yaml`。`padding_offset` 是自滤波的
 膨胀量，不是规划安全裕度。外参准确时首轮 `0.02` m 可用；手臂表面漏进
 Octomap 时提到 `0.03`。规划裕度靠 `octomap_resolution`、静态场景和低速。
 
 supervisor 在场景更新后规划、执行并复检剩余轨迹。被挡住的点会取消 JTC
-目标，从当前状态重规划，最多 `max_replans`（5）次。默认
-`retreat_enabled=false`，重规划失败后原地 `safe_stop`；加
-`retreat_enabled:=true` 则以 0.05 缩放退回 ready。
+目标，从当前状态重规划。两个预算决定什么时候放弃：`max_replans`（20）
+统计“被挡恢复”的次数，每次恢复的轨迹开始执行后归零，所以它限制的是
+**连续恢复失败**，而不是整趟任务的总次数；`max_no_path_retries`（3）统计
+连续返回空轨迹的次数，只有它才会以“无路径”结束重规划。要按目标做硬上限，
+设 `replan_budget_reset_on_success:=false`。默认 `retreat_enabled=false`，
+放弃时原地 `safe_stop`；加 `retreat_enabled:=true` 则以 0.05 缩放退回 ready。
 `ignore_base_link_contacts` 不会把固定底座/台面的安装接触当成运动障碍。
 
 ## 4. 目标 marker 和命令行工具
@@ -145,8 +164,10 @@ ros2 run litearm_moveit_config goal_tool.py \
   --joints 0 0 0 -1.5708 0 0 0
 ```
 
-执行请走 supervisor 的入口。RViz MotionPlanning 的 **Execute** 按钮直接
-调用 move_group，绕过 supervisor 的复检；那里只用 **Plan** 看路径。
+执行请走 supervisor 的入口。真机 launch 默认
+`allow_move_group_execution=false`，RViz MotionPlanning 的 **Execute**
+按钮和 `/move_action` 都不能直接驱动机器人；那里只用 **Plan** 看路径。
+确实需要手动执行做 bring-up 时，显式加 `allow_move_group_execution:=true`。
 
 ## 5. 安全和已知限制
 
