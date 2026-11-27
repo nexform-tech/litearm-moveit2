@@ -343,14 +343,11 @@ It starts the direct-USB control stack, MoveIt, and the RealSense driver
 without Gazebo, and runs the supervisor that rechecks the remaining
 trajectory. The arm model has no gripper.
 
-**The included hand-eye files are a reference, not a portable calibration.**
-They were measured for the D435i with serial 243222074636 and the camera mount
-used on 2026-11-26. The hand-eye transform is a physical measurement: another
-robot, another camera, another mount, or a bumped camera needs a new
-calibration. Reusing the same cell still needs a point-cloud/robot-model
-check. The original `handeye_eye_to_hand_TSAI_20261126_102300.json` used the
-depth/IR intrinsics for color images and is about 15 cm off; use the
-`_fixed.json` file or recalibrate. See
+**The included hand-eye calibration is a reference, not a portable
+calibration.** It was measured for one camera and one mount. The hand-eye
+transform is a physical measurement: another robot, another camera, another
+mount, or a moved or bumped camera needs a new calibration. Reusing the same
+cell still needs a point-cloud/robot-model check. See
 [`litearm_moveit_config/README.md`](litearm_moveit_config/README.md) for the
 procedure and the launch arguments.
 

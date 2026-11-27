@@ -26,20 +26,16 @@ its install rule still runs, and the symlink install fails.
 
 ## 2. Hand-eye calibration
 
-The real stack uses an eye-to-hand D435i calibration. The files in
-`config/handeye/` are reference measurements for one camera and one mount, not
-a portable calibration.
+The real stack uses an eye-to-hand D435i calibration. `config/handeye/` may
+contain calibration files from earlier sessions; treat every one of them as a
+reference measurement for one camera and one mount, not a portable
+calibration.
 
-| File | Use |
-| --- | --- |
-| `handeye_eye_to_hand_TSAI_20261126_102300_fixed.json` | Corrected TSAI result for D435i serial 243222074636 and the 2026-11-26 mount. The launch uses it by default. Reuse it only on the same physical cell, after the verification below. |
-| `handeye_eye_to_hand_TSAI_20261126_102300.json` | Original capture, kept for traceability. It used `fx=615.2` (depth/IR) for 1280x720 color images, so the transform is about 15 cm off. **Do not use it for motion.** |
-
-**Do not reuse the included calibration on another robot, camera, or mount.**
-The hand-eye transform is a physical measurement between the camera and the
-robot base. A different base position, a different D435i (the color intrinsics
-are per device), a different mount, or a bumped camera makes the file wrong.
-Recalibrate, then verify.
+**The included calibration must not be trusted on your cell.** The hand-eye
+transform is a physical measurement between the camera and the robot base. A
+different robot, a different camera, a different mount, a moved or bumped
+camera, or a recalled robot base makes the stored file wrong. Recalibrate, then
+verify before driving the arm.
 
 ### Recalibrate
 
@@ -51,7 +47,7 @@ Recalibrate, then verify.
 3. Read the actual D435i color intrinsics from `/camera/color/camera_info`.
    At 1280x720 the color `fx` is about 910, not 615. Run the eye-to-hand TSAI
    or PARK solve in HandEye Studio with the color intrinsics, check the
-   reprojection error and the residuals, and save the corrected JSON.
+   reprojection error and the residuals, and save the result.
 4. Keep the convention: `T_base_cam` maps the camera frame into `base_link`.
    The camera frame is the color optical frame (x right, y down, z forward).
    `camera_calibration_tf.py` composes it with the driver's
@@ -115,7 +111,7 @@ Pass `start_control:=false` when a control stack already runs,
 | `max_no_path_retries` | `3` | consecutive empty plans before "no path" is declared |
 | `replan_budget_reset_on_success` | `true` | `false` = hard `max_replans` cap per goal |
 | `velocity_scaling` | `0.08` | supervisor speed; keep 0.05 to 0.1 for first runs |
-| `calibration_file` | the `_fixed.json` file | hand-eye JSON |
+| `calibration_file` | the package's hand-eye JSON | hand-eye JSON; replace it with your own calibration |
 | `calibration_frame` | `camera_color_optical_frame` | frame the hand-eye JSON uses |
 | `shape_tf_cache_wait` | `0.5` | ShapeMask TF lookup wait, in seconds |
 | `allow_move_group_execution` | `false` | let move_group/RViz Execute drive the arm; the real launch defaults to supervisor-only |

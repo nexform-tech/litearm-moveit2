@@ -356,17 +356,21 @@ The real-arm avoidance launch now lives in `litearm_moveit_config`:
 
 The real launch also starts the C++ `cloud_envelope_filter` node: it turns
 `/camera/depth/color/points` into `/camera/depth/color/points_envelope` for the
-Octomap. It is pass-through by default; click the green/gray sphere in the
-`/cloud_envelope_filter` interactive marker to toggle a 3 cm envelope around
-the robot collision model (2 cm built-in + 1 cm extra). Green = on, gray = off.
-This is a model envelope, not a manual cable selection; if the cable is more
-than 3 cm from the model, use cable_guard or a manual region filter.
+Octomap. It always runs a flying-pixel filter: each point is projected back to
+a pixel with `/camera/depth/camera_info`, and pixels whose neighbourhood depth
+spread exceeds `flying_pixel_depth_jump` (0.03 m, radius 1 px) are dropped.
+That removes the fan of intermediate depth the D435i generates between the arm
+silhouette and the table — the source of the staircase-shaped ghost voxels that
+survive the 2 cm self-filter. The cloud does not need to be organized. Click
+the green/gray sphere in the `/cloud_envelope_filter` interactive marker to
+additionally toggle a 3 cm envelope around the robot collision model (2 cm
+built-in + 1 cm extra). Green = on, gray = off. This is a model envelope, not a
+manual cable selection; if the cable is more than 3 cm from the model, use
+cable_guard or a manual region filter.
 
-**The included hand-eye files are a reference for one camera and one mount.**
-They were measured for the D435i with serial 243222074636 and the 2026-11-26
-mount. A different robot, camera, mount, or a bumped camera needs a new
-calibration; the original file's color intrinsics are wrong, and the
-`_fixed.json` file or a new calibration must be used. See
+**The included hand-eye calibration is a reference for one camera and one
+mount.** A different robot, camera, mount, or a moved or bumped camera needs a
+new calibration. See
 [`../litearm_moveit_config/README.md`](../litearm_moveit_config/README.md).
 
 This package assumes a fixed external camera where `base_link` does not move

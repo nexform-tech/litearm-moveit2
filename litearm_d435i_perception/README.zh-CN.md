@@ -331,15 +331,18 @@ supervisor 接口：
 
 真机 launch 还会启动 C++ 节点 `cloud_envelope_filter`：它把原始
 `/camera/depth/color/points` 变成 `/camera/depth/color/points_envelope`
-再给 Octomap。默认直通；在 RViz 的 `/cloud_envelope_filter` 交互标记里
-点击绿色/灰色小球切换“机器人碰撞模型周围 3cm”包络（内置 2cm + 额外
-1cm）。绿色开、灰色关；这是模型包络，不是手动框选线缆；线缆离模型超过
-3cm 时需要 cable_guard 或手动区域过滤。
+再给 Octomap。它始终执行飞点过滤：用 `/camera/depth/camera_info` 把每个
+点投回像素平面，邻域深度跨度超过 `flying_pixel_depth_jump`（默认
+0.03 m，半径 1 px）的像素直接丢弃，专门去掉 D435i 在机械臂轮廓和桌面
+之间产生的“中间深度扇面”——也就是 2 cm 自滤波删不掉、最后变成台阶状
+幽灵体素的那一层。点云不需要是有序点云。在 RViz 的
+`/cloud_envelope_filter` 交互标记里点击绿色/灰色小球，还可以额外切换
+“机器人碰撞模型周围 3cm”包络（内置 2cm + 额外 1cm）。绿色开、灰色关；
+这是模型包络，不是手动框选线缆；线缆离模型超过 3cm 时需要 cable_guard
+或手动区域过滤。
 
-**包里的手眼文件只对应这一台相机和这一个安装位置。** 它对应 D435i
-序列号 243222074636 和 2026-11-26 的安装。换机器人、换相机、换安装位置，
-或相机被碰过，都需要重新标定；原始文件的彩色内参是错的，必须用
-`_fixed.json` 或重新标定。流程见
+**包里的手眼标定只对应一台相机和一个安装位置。** 换机器人、换相机、换
+安装位置，或相机被移动、碰过，都需要重新标定。流程见
 [`../litearm_moveit_config/README.zh-CN.md`](../litearm_moveit_config/README.zh-CN.md)。
 
 当前包的固定外置假设是 `base_link` 不随臂运动。若以后改成腕部安装，

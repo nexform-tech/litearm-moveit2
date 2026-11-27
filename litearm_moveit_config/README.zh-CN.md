@@ -24,18 +24,13 @@ symlink install 会失败。
 
 ## 2. 手眼标定
 
-真机栈使用眼在手外的 D435i 标定。`config/handeye/` 里的文件是**某一台
-相机、某一个安装位置**的参考测量，不是通用标定。
+真机栈使用眼在手外的 D435i 标定。`config/handeye/` 里可能留有之前几次的
+标定文件，它们都只是**某一台相机、某一个安装位置**的参考测量，不是通用
+标定。
 
-| 文件 | 用途 |
-| --- | --- |
-| `handeye_eye_to_hand_TSAI_20261126_102300_fixed.json` | 针对 D435i 序列号 243222074636 和 2026-11-26 安装位置的修正 TSAI 结果。launch 默认使用它。只允许在同一物理工位、做完下面的验证后复用。 |
-| `handeye_eye_to_hand_TSAI_20261126_102300.json` | 原始采集，留作追溯。它给 1280x720 彩色图用了 `fx=615.2`（深度/IR）内参，平移差约 15 cm。**不要用它驱动机器人。** |
-
-**不要把包里的标定复用到另一台机器人、另一台相机或另一个安装位置。**
-手眼变换是相机和机器人基座之间的物理测量。基座位置变了、换了 D435i
-（彩色内参是逐台的）、安装支架变了，或者相机被碰过，文件就失效。需要
-重新标定，再做验证。
+**包里的标定不能直接信。** 手眼变换是相机和机器人基座之间的物理测量。
+换机器人、换相机、换安装位置，相机被移动或碰过，或者机器人基座被挪过，
+存下来的文件就失效。需要重新标定，再做验证，然后才能驱动机械臂。
 
 ### 重新标定
 
@@ -45,7 +40,7 @@ symlink install 会失败。
    `T_base_flange`。
 3. 从 `/camera/color/camera_info` 读取实际的 D435i 彩色内参。1280x720 下
    彩色 `fx` 约为 910，不是 615。在 HandEye Studio 里用彩色内参跑眼在手外
-   TSAI 或 PARK，检查重投影误差和残差，保存修正后的 JSON。
+   TSAI 或 PARK，检查重投影误差和残差，保存结果。
 4. 保持约定：`T_base_cam` 把相机坐标系变换到 `base_link`。相机坐标系是
    彩色光学帧（x 右、y 下、z 前）。`camera_calibration_tf.py` 会把它和驱动
    发布的 `camera_link -> camera_color_optical_frame` 出厂变换复合，然后
@@ -105,7 +100,7 @@ marker 和 RViz。机械臂模型不含夹爪。launch 不启动 Gazebo，也不
 | `max_no_path_retries` | `3` | 连续多少次返回空轨迹才判定“无路径” |
 | `replan_budget_reset_on_success` | `true` | `false` = 每个目标硬上限 `max_replans` |
 | `velocity_scaling` | `0.08` | supervisor 速度；首轮保持 0.05 到 0.1 |
-| `calibration_file` | `_fixed.json` 文件 | 手眼标定 JSON |
+| `calibration_file` | 包内的手眼 JSON | 手眼标定 JSON；换成你自己的标定结果 |
 | `calibration_frame` | `camera_color_optical_frame` | 手眼 JSON 对应的相机帧 |
 | `shape_tf_cache_wait` | `0.5` | ShapeMask 查 TF 的等待时间（秒） |
 | `allow_move_group_execution` | `false` | 是否允许 move_group/RViz Execute 直接执行；真机默认只走 supervisor |
