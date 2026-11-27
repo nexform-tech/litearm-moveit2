@@ -143,7 +143,11 @@ supervisor 在场景更新后规划、执行并复检剩余轨迹。被挡住的
 连续返回空轨迹的次数，只有它才会以“无路径”结束重规划。要按目标做硬上限，
 设 `replan_budget_reset_on_success:=false`。默认 `retreat_enabled=false`，
 放弃时原地 `safe_stop`；加 `retreat_enabled:=true` 则以 0.05 缩放退回 ready。
-`ignore_base_link_contacts` 不会把固定底座/台面的安装接触当成运动障碍。
+`ignore_base_link_contacts` 只忽略底座与场景对象（台面/安装板）的固定接触；
+`base_link` 与其他机器人 link（如 `base_link` ↔ `ee_link`）的接触仍会检查。
+安全停会先取消 JTC 目标并保持 busy，直到关节速度降到
+`stop_velocity_tolerance` 以下或 `stop_wait_timeout` 到期，避免用还在运动
+的状态规划新目标。
 
 ## 4. 目标 marker 和命令行工具
 

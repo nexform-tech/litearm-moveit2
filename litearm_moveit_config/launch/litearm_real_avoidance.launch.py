@@ -230,10 +230,12 @@ def _declare_arguments():
                               description="Tracking-error check period (s)"),
         DeclareLaunchArgument("stop_velocity_tolerance", default_value="0.03",
                               description="Wait for all joint velocities below this "
-                                          "(rad/s) before replanning after a cancel"),
+                                          "(rad/s) before replanning or declaring "
+                                          "a safe stop"),
         DeclareLaunchArgument("stop_wait_timeout", default_value="0.5",
                               description="Max extra wait (s) for the arm to stop "
-                                          "before replanning anyway"),
+                                          "before replanning or declaring a safe "
+                                          "stop anyway"),
         DeclareLaunchArgument("controller_wait_timeout", default_value="5.0",
                               description="Safe-stop when the JTC action server does not "
                                           "appear within this time (s)"),
@@ -525,8 +527,9 @@ def _launch_setup(context, *_args, **_kwargs):
                 "retreat_positions": [0.0, 0.0, 0.0, -1.5708, 0.0, 0.0, 0.0],
                 "retreat_velocity_scaling": 0.05,
                 "clear_octomap_on_stale": False,
-                # base_link 和台面/安装板的固定接触不算“可避让障碍”；
-                # 复检忽略它，否则会反复取消—重规划，机械臂一顿一顿。
+                # base_link 与场景对象（台面/安装板）的固定接触不算“可避让
+                # 障碍”；复检忽略它，否则会反复取消—重规划。base_link 与
+                # 机器人 link 的自碰撞仍照常拦截。
                 "ignore_base_link_contacts": True,
             }],
         ))

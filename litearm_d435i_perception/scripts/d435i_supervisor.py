@@ -52,6 +52,9 @@
       被挪走的起点。
     * max_tracking_error>0 时，执行中比较 /joint_states 与最近轨迹点；
       实际跟踪误差超限就安全停，不等 JTC/固件到 0.35 rad 才报错。
+    * 安全停先 cancel，等 JTC 返回 result 且关节速度低于
+      stop_velocity_tolerance，或超过 stop_wait_timeout，才把 busy 置回
+      false；减速期间不接收新目标，避免用运动中的关节状态规划。
     * controller_wait_timeout / execution_timeout_* 防止 action server
       消失或控制器不返回结果时节点永久停在 busy 状态。
     * 这是「停 -> 复检 -> 重规划」，不是 MoveIt Servo 那种毫秒级实时避障。
@@ -123,6 +126,11 @@ class D435iSupervisor(Node):
         # 剩余轨迹复检
         self.declare_parameter("validity_check_period", 0.5)
         self.declare_parameter("validity_stride", 3)
+        # 进度索引只向前推进：每次从上次的索引往后找，并且最多看
+        # progress_lookahead 秒的轨迹。OMPL 路径重访相近构型时，后段的点
+        # 可能看起来更近；不限制前看范围就会跳过马上要走的那一段。
+        # 0 = 不限前看时间（仍然只向前推进）。
+        self.declare_parameter("progress_lookahead", 1.0)
         # 单次 /check_state_validity 的最长等待。超时按“轨迹被挡”处理：
         # 不能让一个不返回的 future 把 check_pending 永久卡住，否则之后
         # 整个执行过程都不再复检。
@@ -136,9 +144,14 @@ class D435iSupervisor(Node):
         self.declare_parameter("pre_execution_stride", 2)
         # base_link 是固定基座，和台面/安装板天然接触；规划器按规划组检查
         # 时不会把它当成可避让碰撞。复检如果检查全部 link，会每个轨迹点都
-        # 判无效，导致取消—重规划—再取消的抖动。默认忽略只涉及 base_link
-        # 的接触；涉及其他 link 的接触仍然照常拦截。
+        # 判无效，导致取消—重规划—再取消的抖动。只忽略 base_link 与场景
+        # 对象（不在 robot_link_names 里的 body）的安装接触；base_link ↔
+        # ee_link 这类真实自碰撞仍照常拦截。
         self.declare_parameter("ignore_base_link_contacts", True)
+        # 机器人本体 link 名。场景对象不在其中；composed URDF（带夹爪）
+        # 可以覆盖这个列表，把夹爪 link 也加进来。
+        self.declare_parameter("robot_link_names",
+                               ["base_link"] + JOINTS + ["ee_link"])
 
         # 起始状态与执行期看门狗。默认关闭，真机的 real_avoidance launch
         # 会打开；仿真/fake 控制栈保持原来的行为。
@@ -183,6 +196,9 @@ class D435iSupervisor(Node):
         self.goal_source = ""
         self.current = {}
         self.current_velocity = {}
+        robot_links = self.get_parameter("robot_link_names").value
+        self.robot_links = set(robot_links) if robot_links else set(
+            ["base_link", "ee_link"] + JOINTS)
         self.last_joint_time = None
         self.sensor_topics = []
         self.sensor_seen = {}
@@ -203,6 +219,7 @@ class D435iSupervisor(Node):
         self.last_check_time = 0.0
         self.check_deadline = 0.0
         self.trajectory = None
+        self.progress_index = 0
         self.exec_start_time = None
         self.exec_deadline = 0.0
         self.last_tracking_time = 0.0
@@ -217,6 +234,8 @@ class D435iSupervisor(Node):
         self.cancel_requested = False
         self.result_received = False
         self.replan_due = 0.0
+        self.safe_stop_reason = ""
+        self.safe_stop_due = 0.0
         self.active_handle = None
         self.exec_seq = 0
         self.last_status_time = 0.0
@@ -706,6 +725,7 @@ class D435iSupervisor(Node):
         self.pending_trajectory = trajectory
         self.pending_state = state_name
         self.trajectory = trajectory
+        self.progress_index = 0
         missing = [name for name in JOINTS if name not in self.current]
         if missing:
             # 用 0.0 补缺失关节会得出错误的复检结果，宁可不执行。
@@ -758,6 +778,7 @@ class D435iSupervisor(Node):
         self.pending_trajectory = trajectory
         self.pending_state = state_name
         self.trajectory = trajectory
+        self.progress_index = 0
         if state_name != "retreating" and bool(
                 self.get_parameter("replan_budget_reset_on_success").value):
             # 一次被挡恢复到此结束：重规划后的轨迹已经通过执行前复检。把
@@ -845,7 +866,7 @@ class D435iSupervisor(Node):
     def _exec_result(self, future, seq):
         if seq != self.exec_seq:
             return
-        if self.state == "canceling":
+        if self.state in ("canceling", "safe_stopping"):
             self.result_received = True
             return
         if self.state not in ("executing", "retreating"):
@@ -884,17 +905,43 @@ class D435iSupervisor(Node):
         self._status("succeeded")
 
     # ── 实际跟踪误差 / 停稳判断 ──
+    @staticmethod
+    def _point_seconds(point):
+        duration = point.time_from_start
+        return duration.sec + duration.nanosec * 1e-9
+
     def _closest_waypoint_index(self):
-        if self.trajectory is None or not self.current:
+        """当前实际关节最接近的轨迹点；索引只向前推进。
+
+        整条轨迹取 L1 最近点看起来更准，但 OMPL 路径可能重访相近构型：
+        手臂还在前段时，后段的相似点可能更近，索引就会跳到后面，复检
+        于是漏掉马上要走的那一段。所以从上次的索引往后找，并且最多看
+        progress_lookahead 秒的轨迹；索引永远不回退。
+        """
+        if self.trajectory is None or not self.trajectory.points \
+                or not self.current:
             return 0
-        best, best_error = 0, float("inf")
-        for index, point in enumerate(self.trajectory.points):
+        points = self.trajectory.points
+        start = min(max(self.progress_index, 0), len(points) - 1)
+        lookahead = float(self.get_parameter("progress_lookahead").value)
+        if lookahead > 0.0:
+            end = start
+            limit = self._point_seconds(points[start]) + lookahead
+            while end + 1 < len(points) \
+                    and self._point_seconds(points[end + 1]) <= limit:
+                end += 1
+        else:
+            end = len(points) - 1
+        best, best_error = start, float("inf")
+        for index in range(start, end + 1):
+            point = points[index]
             error = 0.0
             for name, position in zip(self.trajectory.joint_names,
                                       point.positions):
                 error += abs(self.current.get(name, position) - position)
             if error < best_error:
                 best, best_error = index, error
+        self.progress_index = best
         return best
 
     def _tracking_error(self):
@@ -902,7 +949,8 @@ class D435iSupervisor(Node):
         if self.trajectory is None or not self.trajectory.points \
                 or not self.current:
             return 0.0
-        point = self.trajectory.points[self._closest_waypoint_index()]
+        index = min(self.progress_index, len(self.trajectory.points) - 1)
+        point = self.trajectory.points[index]
         by_name = dict(zip(self.trajectory.joint_names, point.positions))
         errors = [abs(self.current.get(name, by_name[name]) - by_name[name])
                   for name in JOINTS if name in by_name]
@@ -912,14 +960,17 @@ class D435iSupervisor(Node):
         """执行中看实际跟踪误差，不等 JTC/固件到 0.35 rad 才报错。"""
         if self.state not in ("executing", "retreating") or not self.busy:
             return
-        max_error = float(self.get_parameter("max_tracking_error").value)
-        if max_error <= 0.0:
-            return
         period = max(0.05, float(
             self.get_parameter("tracking_check_period").value))
         if now - self.last_tracking_time < period:
             return
         self.last_tracking_time = now
+        # 即使关闭跟踪误差检查，也要推进进度索引：剩余轨迹复检的起点
+        # 依赖它保持在实际执行位置附近。
+        self._closest_waypoint_index()
+        max_error = float(self.get_parameter("max_tracking_error").value)
+        if max_error <= 0.0:
+            return
         error = self._tracking_error()
         self.last_tracking_error = error
         if error > max_error:
@@ -1022,6 +1073,20 @@ class D435iSupervisor(Node):
         future = self.validity_client.call_async(request)
         future.add_done_callback(self._validity_done)
 
+    def _is_base_world_contact(self, contact):
+        """base_link 与场景对象的固定安装接触，不是可避让碰撞。
+
+        ContactInformation 的两个 body 可能是 link 名，也可能是场景对象
+        id。只有对端不在机器人本体 link 集合里时，才是基座与台面/安装板
+        的接触；base_link ↔ ee_link 这类真实自碰撞返回 False，仍交给上层
+        拦截。
+        """
+        bodies = (contact.contact_body_1, contact.contact_body_2)
+        if "base_link" not in bodies:
+            return False
+        other = bodies[1] if bodies[0] == "base_link" else bodies[0]
+        return other not in self.robot_links
+
     def _validity_done(self, future):
         # 超时处理或取消可能已经把状态改掉；迟到的回调不要再推进队列。
         if self.state not in ("executing", "validating_plan"):
@@ -1048,12 +1113,11 @@ class D435iSupervisor(Node):
             self.get_parameter("ignore_base_link_contacts").value)
         relevant = [
             c for c in contacts
-            if not (ignore_base and "base_link" in
-                    (c.contact_body_1, c.contact_body_2))]
+            if not (ignore_base and self._is_base_world_contact(c))]
         if ignore_base and contacts and not relevant:
-            # 只涉及固定 base_link 的接触：规划器按组检查时不算碰撞，复检
-            # 也不能算，否则基座/台面的安装接触会让每个点都“被挡”，造成
-            # 反复取消—重规划。继续检查剩余轨迹点。
+            # 只涉及 base_link 与场景/安装面的固定接触：规划器按组检查时
+            # 不算碰撞，复检也不能算，否则基座/台面的安装接触会让每个点
+            # 都“被挡”，造成反复取消—重规划。继续检查剩余轨迹点。
             now = self._now()
             if now - self.last_base_ignore_log > 10.0:
                 self.last_base_ignore_log = now
@@ -1115,18 +1179,37 @@ class D435iSupervisor(Node):
             lambda _done: self.get_logger().info("数据过期，已清除 Octomap"))
 
     def _safe_stop(self, reason):
+        if self.state == "safe_stopping":
+            return
         self.cancel_requested = True
-        if self.active_handle is not None:
-            try:
-                self.active_handle.cancel_goal_async()
-            except Exception as exc:  # noqa: BLE001 - action server 掉线
-                self.get_logger().warning(f"安全停取消轨迹失败: {exc}")
-            self.active_handle = None
         self.pending_trajectory = None
         self.check_pending = False
         self.check_queue = []
         self._clear_octomap_if_stale(reason)
-        self._status("safe_stop", reason)
+        wait = float(self.get_parameter("stop_wait_timeout").value)
+        if self.active_handle is None or wait <= 0.0:
+            if self.active_handle is not None:
+                try:
+                    self.active_handle.cancel_goal_async()
+                except Exception as exc:  # noqa: BLE001 - action server 掉线
+                    self.get_logger().warning(
+                        f"安全停取消轨迹失败: {exc}")
+                self.active_handle = None
+            self._status("safe_stop", reason)
+            return
+        # cancel 已经发出，但在 JTC 真正停稳（或 stop_wait_timeout 到期）
+        # 之前保持 busy：否则新目标会在减速过程中被接受，规划起点是还在
+        # 动的 /joint_states。
+        self.busy = True
+        self.result_received = False
+        self.safe_stop_reason = reason
+        self.safe_stop_due = self._now() + float(
+            self.get_parameter("cancel_settle").value)
+        try:
+            self.active_handle.cancel_goal_async()
+        except Exception as exc:  # noqa: BLE001 - action server 掉线
+            self.get_logger().warning(f"安全停取消轨迹失败: {exc}")
+        self._status("safe_stopping", reason)
 
     def _cancel_cb(self, _request, response):
         self._safe_stop("user_cancel")
@@ -1138,11 +1221,27 @@ class D435iSupervisor(Node):
     def _tick(self):
         now = self._now()
 
-        if self.busy:
+        # safe_stopping 期间不重跑新鲜度检查：原因已经记录，重复调用
+        # _safe_stop 会重置等待窗口。
+        if self.busy and self.state != "safe_stopping":
             error = self._freshness_error()
             if error:
                 self._safe_stop(error)
                 return
+
+        if self.state == "safe_stopping":
+            tolerance = float(
+                self.get_parameter("stop_velocity_tolerance").value)
+            wait = float(self.get_parameter("stop_wait_timeout").value)
+            if self.result_received or now >= self.safe_stop_due:
+                if now < self.safe_stop_due + wait \
+                        and not self._is_stopped(tolerance):
+                    self._publish_status()
+                    return
+                self.active_handle = None
+                self._status("safe_stop", self.safe_stop_reason)
+            self._publish_status()
+            return
 
         # 实际跟踪误差看门狗：执行中/撤退中都看，超限立刻安全停。
         self._maybe_check_tracking(now)

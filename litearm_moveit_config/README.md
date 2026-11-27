@@ -162,7 +162,11 @@ trajectory, and only that ends replanning as "no path". Set
 With the default `retreat_enabled=false`, giving up ends in a `safe_stop` where
 the arm is; with `retreat_enabled:=true`, it retreats to the ready pose at 0.05
 scaling. `ignore_base_link_contacts` keeps the fixed base/table mounting
-contact from being treated as a moving obstacle.
+contact from being treated as a moving obstacle; contacts between `base_link`
+and other robot links (for example `base_link` ↔ `ee_link`) are still checked.
+A safe stop keeps the supervisor busy until the joint velocities fall below
+`stop_velocity_tolerance` or `stop_wait_timeout` expires, so a new goal is not
+planned from a still-moving state.
 
 ## 4. Goal marker and goal tool
 
