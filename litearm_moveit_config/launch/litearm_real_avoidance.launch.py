@@ -20,9 +20,10 @@
 
 标定
 ====
-默认使用 config/handeye/ 下按 D435i 实际彩色内参重算过的 TSAI 结果。
-原始 handeye_eye_to_hand_TSAI_20261126_102300.json 用的是 fx=615.2，
-与 1280x720 彩色流的实际 fx=910.37 不一致；不要直接用原始文件做真机运动。
+默认使用 config/handeye/handeye_eye_to_hand_TSAI_20261127_110042_fixed.json：
+2026-11-27 11:00 重标定（15 个位姿）按 D435i 实际彩色内参重算，中位 4.54 mm / 1.10°。
+原始标定 JSON 用的是 fx=615.2（深度/IR 值），与 1280x720 彩色流的实际
+fx=910.37 不一致；不要直接用原始文件做真机运动，必须用 _fixed 结果。
 标定帧默认 camera_color_optical_frame；点云在 camera_depth_optical_frame，
 两者通过驱动发布的 camera_link -> camera_*_optical_frame 静态 TF 连接。
 
@@ -166,7 +167,7 @@ def _declare_arguments():
         # ── 标定 / TF ──
         DeclareLaunchArgument("calibration_file", default_value="",
                               description="Hand-eye JSON; empty = the package's "
-                                          "config/handeye/..._fixed.json"),
+                                          "config/handeye/..._20261127_110042_fixed.json"),
         DeclareLaunchArgument("calibration_frame",
                               default_value="camera_color_optical_frame",
                               description="Frame the calibration T_base_cam refers to; "
@@ -368,7 +369,7 @@ def _launch_setup(context, *_args, **_kwargs):
 
     calibration_file = resolve("calibration_file").strip() or os.path.join(
         moveit_share, "config", "handeye",
-        "handeye_eye_to_hand_TSAI_20261126_102300_fixed.json")
+        "handeye_eye_to_hand_TSAI_20261127_110042_fixed.json")
     calibration_file = os.path.abspath(os.path.expanduser(calibration_file))
     sensors_file = resolve("sensors_file").strip() or os.path.join(
         moveit_share, "config", "sensors_3d_real.yaml")
