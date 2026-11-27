@@ -135,6 +135,24 @@ def _declare_arguments():
                               description="Filtered point cloud for sensors_3d"),
         DeclareLaunchArgument("cloud_envelope_frame", default_value="base_link",
                               description="Robot model / marker frame for cloud_envelope_filter"),
+        DeclareLaunchArgument("cloud_flying_pixel_filter", default_value="true",
+                              description="Reject depth-discontinuity flying pixels in "
+                                          "cloud_envelope_filter: project each point back "
+                                          "to a pixel with cloud_camera_info_topic and "
+                                          "drop neighbourhoods with a large depth spread"),
+        DeclareLaunchArgument("cloud_flying_pixel_depth_jump", default_value="0.03",
+                              description="Max depth spread (m) inside the neighbourhood "
+                                          "of a pixel before it is dropped as a flying "
+                                          "pixel; 0.03 keeps real surfaces, removes the "
+                                          "arm/table edge fan"),
+        DeclareLaunchArgument("cloud_flying_pixel_radius", default_value="1",
+                              description="Pixel neighbourhood radius used by the flying "
+                                          "pixel filter (px); larger = wider edge band"),
+        DeclareLaunchArgument("cloud_camera_info_topic",
+                              default_value="/camera/depth/camera_info",
+                              description="CameraInfo used to project the point cloud "
+                                          "back to pixels for the flying-pixel filter; "
+                                          "must match the point cloud stream"),
         DeclareLaunchArgument("rviz_config", default_value="",
                               description="RViz config file; empty = the package's "
                                           "rviz/moveit.rviz"),
@@ -237,6 +255,20 @@ def _launch_setup(context, *_args, **_kwargs):
     cloud_output = resolve("cloud_envelope_output_topic").strip() or \
         "/camera/depth/color/points_envelope"
     cloud_frame = resolve("cloud_envelope_frame").strip() or "base_link"
+    cloud_flying = _is_true(resolve("cloud_flying_pixel_filter"))
+    try:
+        cloud_flying_jump = float(resolve("cloud_flying_pixel_depth_jump"))
+    except ValueError:
+        cloud_flying_jump = 0.03
+    if not math.isfinite(cloud_flying_jump) or cloud_flying_jump <= 0.0:
+        cloud_flying_jump = 0.03
+    try:
+        cloud_flying_radius = int(float(resolve("cloud_flying_pixel_radius")))
+    except ValueError:
+        cloud_flying_radius = 1
+    cloud_flying_radius = min(8, max(0, cloud_flying_radius))
+    cloud_camera_info = resolve("cloud_camera_info_topic").strip() or \
+        "/camera/depth/camera_info"
     if start_cloud_filter:
         actions.append(Node(
             package="litearm_d435i_perception",
@@ -254,6 +286,10 @@ def _launch_setup(context, *_args, **_kwargs):
                     "marker_frame": cloud_frame,
                     "padding": cloud_padding,
                     "enabled": cloud_enabled,
+                    "flying_pixel_filter": cloud_flying,
+                    "flying_pixel_depth_jump": cloud_flying_jump,
+                    "flying_pixel_radius": cloud_flying_radius,
+                    "camera_info_topic": cloud_camera_info,
                 },
             ],
         ))
@@ -281,7 +317,9 @@ def _launch_setup(context, *_args, **_kwargs):
     if start_cloud_filter:
         cloud_filter_text = (
             f"on ({cloud_padding:.3f} m, "
-            f"{'enabled' if cloud_enabled else 'disabled until toggled in RViz'})")
+            f"{'enabled' if cloud_enabled else 'disabled until toggled in RViz'}), "
+            f"flying-pixel filter "
+            f"{f'>{cloud_flying_jump * 1000:.0f} mm / {cloud_flying_radius} px' if cloud_flying else 'off'}")
     else:
         cloud_filter_text = "off"
     actions.insert(0, LogInfo(msg=(

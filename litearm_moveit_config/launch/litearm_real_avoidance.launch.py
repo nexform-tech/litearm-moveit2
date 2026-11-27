@@ -269,6 +269,17 @@ def _declare_arguments():
         DeclareLaunchArgument("cloud_envelope_enabled", default_value="false",
                               description="Start with the 3 cm envelope filter enabled; "
                                           "the RViz marker toggles it at runtime"),
+        DeclareLaunchArgument("cloud_flying_pixel_filter", default_value="true",
+                              description="Drop depth-discontinuity flying pixels "
+                                          "(the fan between the arm silhouette and the "
+                                          "table) before the Octomap; this is what "
+                                          "prevents the staircase-shaped ghost voxels"),
+        DeclareLaunchArgument("cloud_flying_pixel_depth_jump", default_value="0.03",
+                              description="Neighbourhood depth spread (m) above which a "
+                                          "pixel is treated as a flying pixel"),
+        DeclareLaunchArgument("cloud_flying_pixel_radius", default_value="1",
+                              description="Neighbourhood radius (px) for the flying-pixel "
+                                          "filter"),
         DeclareLaunchArgument("allow_move_group_execution", default_value="false",
                               description="Allow move_group /move_action and RViz "
                                           "Execute to drive the arm. Default false: "
@@ -334,6 +345,12 @@ def _launch_setup(context, *_args, **_kwargs):
         resolve("start_cloud_envelope_filter"), True)
     cloud_enabled = _parse_bool(resolve("cloud_envelope_enabled"), False)
     cloud_padding = _float(resolve("cloud_envelope_padding"), 0.03)
+    cloud_flying = _parse_bool(resolve("cloud_flying_pixel_filter"), True)
+    cloud_flying_jump = _float(resolve("cloud_flying_pixel_depth_jump"), 0.03)
+    if cloud_flying_jump <= 0.0:
+        cloud_flying_jump = 0.03
+    cloud_flying_radius = int(_float(resolve("cloud_flying_pixel_radius"), 1))
+    cloud_flying_radius = min(8, max(0, cloud_flying_radius))
     allow_move_group_execution = _parse_bool(
         resolve("allow_move_group_execution"), False)
     validity_period = _float(resolve("validity_check_period"), 0.5)
@@ -403,6 +420,10 @@ def _launch_setup(context, *_args, **_kwargs):
             "cloud_envelope_padding": f"{cloud_padding:.3f}",
             "cloud_envelope_enabled":
                 "true" if cloud_enabled else "false",
+            "cloud_flying_pixel_filter":
+                "true" if cloud_flying else "false",
+            "cloud_flying_pixel_depth_jump": f"{cloud_flying_jump:.3f}",
+            "cloud_flying_pixel_radius": str(cloud_flying_radius),
             "rviz_config": rviz_config,
             "log_level": log_level,
             "ros_domain_id": domain_id,
@@ -556,7 +577,9 @@ def _launch_setup(context, *_args, **_kwargs):
         f"  相机: {'启动' if start_camera else '未启动'} "
         f"({camera_namespace.rstrip('/')}/{camera_name}), "
         f"点云 /camera/depth/color/points -> 包络过滤 "
-        f"{'开 (3cm, 默认关)' if start_cloud_filter else '关'}\n"
+        f"{'开 (3cm, 默认关)' if start_cloud_filter else '关'}, "
+        f"飞点过滤 "
+        f"{f'开 ({cloud_flying_jump * 1000:.0f}mm/{cloud_flying_radius}px)' if cloud_flying else '关'}\n"
         f"  标定: {calibration_file}\n"
         f"       {calibration_text}\n"
         f"  标定帧: {calibration_frame} -> 发布 {base_frame} -> {camera_link_frame}\n"

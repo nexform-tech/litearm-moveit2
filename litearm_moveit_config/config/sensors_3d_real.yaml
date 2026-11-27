@@ -26,6 +26,13 @@
 # move_group 的 shape_transform_cache_lookup_wait_time 由 launch 参数
 # shape_tf_cache_wait 设置，真机默认 0.5 s。
 #
+# 模型内部的点由 ShapeMask 负责；模型外部还有一层 D435i 在“机械臂轮廓
+# vs 桌面/背景”处产生的中间深度飞点，它们会绕过 2 cm 自滤波、在 Octomap
+# 里堆成台阶状幽灵。cloud_envelope_filter 在点云进入本话题前，用
+# /camera/depth/camera_info 把每个点投回像素平面，按 2D 邻域深度跨度把
+# 它们削掉（flying_pixel_filter，默认开，阈值 0.03 m，半径 1 px）。
+# 如果相机内参话题改名，用 launch 参数 cloud_camera_info_topic 同步修改。
+#
 # 参数取值
 # ========
 # padding_offset 是“自滤波形状”的每侧膨胀，不是规划安全裕度。真机首轮用
