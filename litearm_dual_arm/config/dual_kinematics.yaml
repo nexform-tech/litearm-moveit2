@@ -1,0 +1,18 @@
+# dual_kinematics.yaml — 左右臂的 KDL 逆运动学参数。
+#
+# `both_arms` 是两条链的组合，不是一条运动链，KDL 无法对它求 IK；所有双臂
+# 目标都用关节空间约束，笛卡尔路径只对单臂组（left_arm / right_arm）调用。
+#
+# 和单臂配置一样，KDL 的 timeout/attempts 是 MoveIt 侧预算，不是硬件周期。
+# KDL 迭代解经常用满预算，0.2 s / 4 次比上游示例的 0.005 s 更实际。
+left_arm:
+  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+  kinematics_solver_search_resolution: 0.005
+  kinematics_solver_timeout: 0.2
+  kinematics_solver_attempts: 4
+
+right_arm:
+  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+  kinematics_solver_search_resolution: 0.005
+  kinematics_solver_timeout: 0.2
+  kinematics_solver_attempts: 4

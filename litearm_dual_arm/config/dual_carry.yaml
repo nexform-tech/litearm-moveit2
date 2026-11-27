@@ -1,0 +1,52 @@
+# dual_carry.yaml — 确定性仿真里的双臂同步搬运。
+#
+# 托盘由两个虚拟夹持点表示，不需要夹爪：
+#   * 左右工具分别对准 start_center ± separation_axis * hand_separation/2；
+#   * 两个位姿用 /compute_ik 求到关节角；
+#   * 两臂分别做笛卡尔直线，按共同进度拼成 14 关节同步轨迹；
+#   * 每个采样点检查双臂互碰、托盘间距、共面和姿态。
+#
+# 这组数值是按当前“两臂都 yaw=+90°、基座 y=±0.38 m”的挂载搜索出来的：
+#   start: left (0.1, 0.05, 0.50), right (-0.1, 0.05, 0.50)
+#   end  : left (0.18, 0.05, 0.50), right (0.02, 0.05, 0.50)
+# 工具 Z 轴朝上，托盘由两个工具法兰从下方托住。左右方向沿世界 X。
+#
+# ⚠ 改挂载、改台面或换工具后必须重新做 IK/FK/碰撞验证，不能直接沿用。
+frame: world
+scene: dual_carry_static
+
+start_center: [0.0, 0.05, 0.50]
+direction: [1.0, 0.0, 0.0]
+distance_m: 0.08
+hand_separation_m: 0.20
+separation_axis: [1.0, 0.0, 0.0]
+
+# 工具朝向（xyzw）：两臂工具 Z 轴都朝上，托盘放在两个法兰上方。
+left_xyzw: [0.0, 0.0, 0.0, 1.0]
+right_xyzw: [0.0, 0.0, 0.0, 1.0]
+
+# 已对当前挂载验证过的起始关节角（rad）。KDL IK 会返回不同的解，某些解会
+# 让左右臂互相穿插；这里固定一组已验证无碰撞的解，启动时再用 FK 核对它与
+# 上面的工具位姿一致。改挂载后必须重新求 IK 并更新这两组值。
+start_left_rad:
+  [-2.219804, -0.856911, -1.169210, -1.766180, 0.189417, 1.286225, 0.952704]
+start_right_rad:
+  [-1.949808, 0.652561, 1.334325, -1.200931, -2.363724, -0.770738, -1.353617]
+
+motion:
+  planning_time_s: 10.0
+  velocity_scaling: 0.10
+  acceleration_scaling: 0.10
+  max_cartesian_step_m: 0.0025
+  cartesian_jump_threshold: 5.0
+  revolute_jump_threshold_rad: 0.50
+  path_duration_s: 8.0
+  samples: 41
+  goal_tolerance_rad: 0.020
+  execution_timeout_s: 30.0
+
+validation:
+  position_tolerance_m: 0.002
+  orientation_tolerance_rad: 0.010
+  separation_tolerance_m: 0.002
+  plane_tolerance_m: 0.002

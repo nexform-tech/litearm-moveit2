@@ -368,13 +368,14 @@ export ROS_DOMAIN_ID=42; export ROS_LOCALHOST_ONLY=1
 | 产品 | LiteArm 机械臂系列 |
 | 本仓库定位 | ROS 2 上的 MoveIt 2 集成 |
 | ROS 2 发行版 | Humble Hawksbill |
-| 状态 | 活跃 —— `litearm_moveit_config` 可用 |
+| 状态 | 活跃 —— `litearm_moveit_config`、`litearm_dual_arm` 可用 |
 
 ## 包内容
 
 | 包 | 作用 |
 | --- | --- |
 | `litearm_moveit_config` | litearm 七轴臂的 MoveIt 2 配置：SRDF 与碰撞矩阵、KDL 运动学、由固件参数表派生的关节限位、OMPL 规划流水线、`moveit_controllers`、RViz 布局、launch 文件，以及验收探针 |
+| `litearm_dual_arm` | 双 LiteArm 的 MoveIt 2 集成：由单臂描述生成双臂 URDF/SRDF，一个 move_group 内提供 `left_arm`/`right_arm`/`both_arms` 三个组和共享 Planning Scene；左右臂碰撞对默认全部保留，用于双臂互碰检查。含确定性仿真执行桥、双通道 action server、碰撞/同步/fail-closed 验收探针、不带夹爪的同步搬运任务（虚拟托盘 + 双笛卡尔路径）、共享工作空间交替作业任务，以及接两套 side 命名空间控制栈的真机入口（默认只规划，执行需授权/急停/标定门控） |
 | `litearm_obstacle_avoidance` | 机械臂 + LiteGrip 夹爪的组合描述与 SRDF：夹爪作为末端工具参与碰撞检查；规划参数复用 `litearm_moveit_config`。夹爪安装偏移按“拆掉 10.3 mm 端盖、尾部凸台占位”取 0.0538 m，；另含 `scene.yaml` 静态工位（scene_builder/scene_probe）、夹爪全行程保守包络（默认 10 mm 外扩，margin_probe 验收）、执行监督 avoid_supervisor（取消/重规划、失败后低速撤退、数据过期拒动，replan_probe/safety_probe 验收）与干跑验收 |
 | `litearm_d435i_perception` | Gazebo Classic 中固定外置 D435i 的感知避障演示：深度点云经 MoveIt Octomap（含机器人自滤波）进入 PlanningScene，支持位姿/关节目标、执行中剩余轨迹复检与“停 → 重规划”、可选 Gazebo 动态障碍；含 RViz 布局与验收探针 |
 

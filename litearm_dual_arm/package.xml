@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>litearm_dual_arm</name>
+  <version>1.0.0</version>
+  <description>
+    双 LiteArm 的 MoveIt 2 集成：由单臂描述生成双臂 URDF/SRDF，提供
+    left_arm/right_arm/both_arms 三个规划组、共享 Planning Scene、双臂互碰
+    检查，以及确定性仿真执行桥（状态合并、14→7+7 轨迹转发、fail-closed）。
+    含不带夹爪的同步搬运任务（虚拟托盘、双笛卡尔路径、逐点互碰/几何复检）
+    和共享工作空间交替作业任务（单臂轮流进入、空闲臂漂移检查）。
+    真机入口接两套 litearm_ros2_control 的 side:=left|right 控制栈，默认只
+    规划，执行需要安全门控；本包自身不打开 USB。
+  </description>
+  <maintainer email="TODO@email.com">TODO</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- 单臂描述与关节限位/单臂 SRDF 的真源；双臂模型由它们派生 -->
+  <exec_depend>litearm_description</exec_depend>
+  <exec_depend>litearm_moveit_config</exec_depend>
+
+  <!-- 真机入口后续使用 litearm_ros2_control 的多实例控制栈 -->
+  <exec_depend>litearm_ros2_control</exec_depend>
+
+  <exec_depend>moveit_ros_move_group</exec_depend>
+  <exec_depend>moveit_planners_ompl</exec_depend>
+  <exec_depend>moveit_kinematics</exec_depend>
+  <exec_depend>moveit_ros_visualization</exec_depend>
+  <exec_depend>moveit_simple_controller_manager</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>builtin_interfaces</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>shape_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

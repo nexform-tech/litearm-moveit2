@@ -1,0 +1,139 @@
+# dual_goals.yaml — 双臂验收用的关节目标。
+#
+# 这些目标不是业务任务，只用于验证：
+#   * 三个规划组都能在共享场景里规划；
+#   * both_arms 的 14 自由度联合轨迹在采样点上没有左右互碰；
+#   * 单臂组规划时另一条臂仍在场景中参与碰撞检查；
+#   * mutual_collision_case 是预期无效的左右互碰负向用例。
+#
+# 规划目标的值取自台架参考端盘位形；mutual_collision_case 是随机搜索得到的
+# 碰撞位形。所有 joint 值均在 joint_limits.yaml 的范围内。换挂载、换台面
+# 或换工具后必须重新做 FK/碰撞校验，不能直接沿用。
+targets:
+  both_zero:
+    group: both_arms
+    description: 两臂全零位，安全基线
+    positions:
+      left_joint1: 0.0
+      left_joint2: 0.0
+      left_joint3: 0.0
+      left_joint4: 0.0
+      left_joint5: 0.0
+      left_joint6: 0.0
+      left_joint7: 0.0
+      right_joint1: 0.0
+      right_joint2: 0.0
+      right_joint3: 0.0
+      right_joint4: 0.0
+      right_joint5: 0.0
+      right_joint6: 0.0
+      right_joint7: 0.0
+
+  both_ready:
+    group: both_arms
+    description: 两臂肘部抬起，比全零位更适合作为规划起点
+    positions:
+      left_joint1: 0.0
+      left_joint2: 0.0
+      left_joint3: 0.0
+      left_joint4: -1.5708
+      left_joint5: 0.0
+      left_joint6: 0.0
+      left_joint7: 0.0
+      right_joint1: 0.0
+      right_joint2: 0.0
+      right_joint3: 0.0
+      right_joint4: -1.5708
+      right_joint5: 0.0
+      right_joint6: 0.0
+      right_joint7: 0.0
+
+  both_safe:
+    group: both_arms
+    description: 台架参考端盘起始位形；两臂都进入共享工作空间，但工具保持 0.20 m 间距
+    positions:
+      left_joint1: -2.464046002
+      left_joint2: 0.034491623
+      left_joint3: 0.237986151
+      left_joint4: -1.292763821
+      left_joint5: 1.258539823
+      left_joint6: 0.875754410
+      left_joint7: -0.387639220
+      right_joint1: -2.027002402
+      right_joint2: 0.463497983
+      right_joint3: 1.886479584
+      right_joint4: -1.297616069
+      right_joint5: 1.208890693
+      right_joint6: -0.274917334
+      right_joint7: -0.400227996
+
+  left_ready:
+    group: left_arm
+    description: 左臂肘部抬起，作为交替作业的停车/回撤位
+    positions:
+      left_joint1: 0.0
+      left_joint2: 0.0
+      left_joint3: 0.0
+      left_joint4: -1.5708
+      left_joint5: 0.0
+      left_joint6: 0.0
+      left_joint7: 0.0
+
+  right_ready:
+    group: right_arm
+    description: 右臂肘部抬起，作为交替作业的停车/回撤位
+    positions:
+      right_joint1: 0.0
+      right_joint2: 0.0
+      right_joint3: 0.0
+      right_joint4: -1.5708
+      right_joint5: 0.0
+      right_joint6: 0.0
+      right_joint7: 0.0
+
+  left_safe:
+    group: left_arm
+    description: 左臂单独进入共享工作空间；右臂保持当前状态
+    positions:
+      left_joint1: -2.464046002
+      left_joint2: 0.034491623
+      left_joint3: 0.237986151
+      left_joint4: -1.292763821
+      left_joint5: 1.258539823
+      left_joint6: 0.875754410
+      left_joint7: -0.387639220
+
+  right_safe:
+    group: right_arm
+    description: 右臂单独进入共享工作空间；左臂保持当前状态
+    positions:
+      right_joint1: -2.027002402
+      right_joint2: 0.463497983
+      right_joint3: 1.886479584
+      right_joint4: -1.297616069
+      right_joint5: 1.208890693
+      right_joint6: -0.274917334
+      right_joint7: -0.400227996
+
+  # 故意碰撞目标：左右臂的碰撞体互相穿插，只用于
+  # `dual_arm_probe.py --target mutual_collision_case --check-state`。
+  # 它是“预期无效”的用例，不要拿去规划或执行；验收脚本会要求 MoveIt 返回
+  # valid=false，并且 contacts 里出现 left_* ↔ right_* 的接触对。
+  mutual_collision_case:
+    group: both_arms
+    description: 预期无效的左右互碰位形，仅用于 --check-state
+    positions:
+      left_joint1: 0.282685682
+      left_joint2: -1.619892436
+      left_joint3: -0.166689633
+      left_joint4: -1.401908027
+      left_joint5: -2.092705800
+      left_joint6: -0.389742078
+      left_joint7: -0.044824603
+      right_joint1: -0.147887931
+      right_joint2: 1.438857054
+      right_joint3: -0.632176156
+      right_joint4: -0.318324407
+      right_joint5: -1.156984993
+      right_joint6: 0.752763887
+      right_joint7: -1.057319398
