@@ -1,0 +1,28 @@
+# camera_mount.yaml — 固定外置 D435i 的安装位姿（eye-to-hand）。
+#
+# 同一份数据同时被三个消费者读取，保证 Gazebo 里的相机、TF 树和 Octomap
+# 的坐标完全一致：
+#   scripts/spawn_model.py  把相机模型插入 Gazebo 的 world 坐标系
+#   scripts/camera_tf.py    发布 base_link -> camera_link 与两个光学帧
+#   scripts/d435i_probe.py  读取相机位姿做可视化/自检（可选）
+#
+# 位姿含义
+# ========
+# xyz 是 camera_link 原点在 base_link 下的位置；rpy 是固定轴 ZYX 欧拉角。
+# Gazebo 的 camera 传感器沿 link 的 +X 看出去，所以默认值：
+#
+#   位置 (1.0, 0.0, 0.9)，yaw = pi 让 +X 指向 -X 世界方向，
+#   pitch = 0.70 rad (约 40°) 向下俯视，视线落点约在 (0.03, 0, 0.08)，
+#   即机械臂底座附近；87° 水平 FOV 足以覆盖 0.9 m 工作台和整条臂。
+#
+# 改这里之后不需要改 launch：spawn 和 TF 都从本文件取值。
+# 真实 D435i 上机时，把 xyz/rpy 换成标定值即可；Octomap 的固定帧仍是
+# base_link（相机固定时 base_link 不随臂运动）。
+frame_id: base_link
+camera_link: camera_link
+depth_optical_frame: camera_depth_optical_frame
+color_optical_frame: camera_color_optical_frame
+
+pose:
+  xyz: [1.00, 0.00, 0.90]
+  rpy: [0.00, 0.70, 3.141592653589793]

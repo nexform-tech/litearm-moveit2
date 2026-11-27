@@ -1,0 +1,92 @@
+<?xml version="1.0"?>
+<!--
+  litearm_litegrip_fake.urdf.xacro — 干跑（无硬件）组合描述。
+
+  与真机版本共用 litearm_litegrip.geometry.urdf.xacro 的几何与安装变换，
+  只把硬件块换成 mock_components/GenericSystem：它把下发的 position /
+  velocity 指令直接回读为 state，于是 JTC 看到的状态与参考完全一致，
+  /move_action -> follow_joint_trajectory -> 轨迹推进 的整条链路可以在
+  没有机械臂的情况下跑完。
+
+  用途：验证执行、重规划与失败停靠逻辑。它**不是**动力学仿真：
+  没有惯性、重力、跟踪误差，也不会真的动。真机行为必须回真机验证。
+
+  为什么不用 litearm_ros2_control 的 <ros2_control> 块改插件
+  ==========================================================
+  那个块声明了 LitearmSystem 专属参数（USB 口、使能次数、servo 命令等）
+  与诊断 state_interface（temperature_mos 等）。GenericSystem 不认识这些
+  接口，声明出来会在控制器激活时报接口不存在。这里显式只声明 JTC 需要的
+  position / velocity 两类接口，和 config/litearm_controllers.yaml 一致：
+
+      command: position, velocity
+      state:   position, velocity
+
+  夹爪的 gripper_opening_joint 不在这里声明：没有夹爪驱动，MoveIt 按
+  闭合位（0）处理，见 geometry 文件头的已知限制。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="litearm">
+
+  <xacro:include filename="litearm_litegrip.geometry.urdf.xacro"/>
+
+  <ros2_control name="LitearmFakeSystem" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+
+    <joint name="joint1">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint2">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint3">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint4">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint5">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint6">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint7">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <!--
+      夹爪没有驱动，但 MoveIt 的 occupancy map self-filter 需要**完整**的
+      机器人状态：缺了 gripper_opening_joint，/joint_states 不完整，
+      自滤波拿不到夹爪 link 的变换（日志: Missing transform for shape mesh），
+      Octomap 更新会持续报错。这里只导出 state 接口（无 command），
+      joint_state_broadcaster 会把它发出去，MoveIt 按 0（闭合位）处理。
+    -->
+    <joint name="gripper_opening_joint">
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+
+</robot>

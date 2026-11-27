@@ -26,6 +26,11 @@ planned_trajectory（Humble 版 MoveIt2 的行为），拿不到规划结果做�
   # 真机：起控制栈后执行
   ros2 launch litearm_moveit_config litearm_moveit.launch.py &
   python3 moveit_probe.py --execute      # 规划并执行（会驱动机械臂）
+
+⚠ 真机避障 launch 默认把 move_group 的 execute 能力关掉
+  （allow_move_group_execution=false），--execute 会失败。日常执行请走
+  d435i_supervisor；只有做控制栈 bring-up 时才显式加
+  allow_move_group_execution:=true。
 """
 
 import argparse

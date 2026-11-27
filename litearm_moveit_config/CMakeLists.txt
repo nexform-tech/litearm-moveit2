@@ -12,6 +12,9 @@ install(DIRECTORY config launch rviz
 install(PROGRAMS
   scripts/moveit_probe.py
   scripts/acceptance_moveit.sh
+  scripts/camera_calibration_tf.py
+  scripts/goal_marker.py
+  scripts/goal_tool.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

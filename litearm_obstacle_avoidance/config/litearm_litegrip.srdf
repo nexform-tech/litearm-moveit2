@@ -1,0 +1,132 @@
+<?xml version="1.0"?>
+<!--
+  litearm_litegrip.srdf — 「机械臂 + LiteGrip 夹爪」组合模型的 MoveIt 语义描述。
+
+  与 litearm_moveit_config/config/litearm.srdf 的关系
+  ==================================================
+  本文件是它的超集：规划组、命名状态、虚拟关节都保持一致，另加夹爪组与
+  夹爪 link 的碰撞矩阵条目。这样既有的规划/执行链路（JTC、探针、速度缩放）
+  不需要改，只是机器人模型多了一段末端执行器。
+
+  规划组
+  ======
+  litearm_arm : base_link -> ee_link 的 7 轴链，与固件和既有配置一致。
+  gripper     : 只有 gripper_opening_joint 一个主动关节。两个手指是 URDF
+                mimic link，位置由该关节唯一决定，因此不是独立自由度。
+
+  碰撞矩阵来源
+  ============
+  由 tools/compute_collision_matrix.py 对组合后的 URDF 采样生成
+  （120 个位形，零位 + 随机）。步骤：先用 xacro 把
+  litearm_litegrip.urdf.xacro 展开成 URDF，再把该 URDF 与采样数交给脚本
+  （参数名见脚本 docstring；注释体里不能出现以双连字符开头的命令行参数，
+  XML 解析器会报 not well-formed，故此处不展开）。
+
+  工具会把 URDF 里 prismatic 关节按关节原点处理（不采样它们的行程），
+  也就是夹爪手指按「张开」位形参与计算——对本臂来说这是更宽的碰撞包络，
+  偏安全。手指之间、手指与臂之间的「某些位形下会接触」一律保留检查。
+  工具同时支持 mesh 与 box/cylinder/sphere 图元（夹爪包络是 box）。
+
+  ⚠ 手工补充的对（点云近似测不出面重合或包含关系，必须固定保留）
+    1) ee_link <-> litegrip_base_link
+       实机安装时端盖（ee_link.STL）会被拆掉，夹爪尾部同直径、同长度的
+       凸台占据它的空间。模型里端盖几何保留（单臂显示仍需要），于是两者
+       在安装区域完全重合。
+    2) joint7 <-> litegrip_base_link
+       夹爪内移 10.3 mm 后，尾部凸台与 joint7 输出端外壳在模型里重合。
+    3) 包络 <-> 手指（4 对）
+       包络按设计**包住**手指的全行程体积，两者表面不相交、点云间距约
+       等于 margin，工具测不出“包含”；但精确网格检查可能把它当碰撞。
+       包络本来就是为了替代手指做安全检查，因此这些对禁用。
+    1)、2) 都是经固定关节刚性相连的结构接触，相对位姿永不变化，不是规划
+    需要避开的区域。漏禁用的后果是 MoveIt 认为起始状态即自碰撞、所有规划
+    直接失败（本次改安装位姿后实测踩到过）。改安装位姿/包络后必须复核。
+
+  夹爪安装偏移按“拆端盖后尾部凸台占位”取 0.0538（参考模型给的是
+  0.0641，对应端盖未拆、夹爪叠在端盖上的构型），见
+  litearm_litegrip.geometry.urdf.xacro 文件头。改值后必须重跑上面的命令
+  并复核本文件。
+
+  已知限制（阶段 2 已缓解）：没有夹爪状态来源时，MoveIt 按
+  gripper_opening_joint = 0（闭合位）显示/计算真实手指；但碰撞检查同时
+  使用手指全行程保守包络（litegrip_finger_envelope_l/r），张开位形也被
+  覆盖。抓取规划需要精确掌握区时，可用
+  include_gripper_envelope:=false 关掉包络，并改为发布夹爪状态；同时要
+  删除本文件里引用包络 link 的 disable_collisions 条目。
+-->
+<robot name="litearm">
+
+  <!-- ── 规划组 ── -->
+  <group name="litearm_arm">
+    <chain base_link="base_link" tip_link="ee_link"/>
+  </group>
+  <group name="gripper">
+    <joint name="gripper_opening_joint"/>
+  </group>
+
+  <!-- ── 命名状态 ── -->
+  <!-- zero / ready 与 litearm_moveit_config 的 SRDF 一致，便于复用既有探针。 -->
+  <group_state name="zero" group="litearm_arm">
+    <joint name="joint1" value="0"/>
+    <joint name="joint2" value="0"/>
+    <joint name="joint3" value="0"/>
+    <joint name="joint4" value="0"/>
+    <joint name="joint5" value="0"/>
+    <joint name="joint6" value="0"/>
+    <joint name="joint7" value="0"/>
+  </group_state>
+  <group_state name="ready" group="litearm_arm">
+    <joint name="joint1" value="0"/>
+    <joint name="joint2" value="0"/>
+    <joint name="joint3" value="0"/>
+    <joint name="joint4" value="-1.5708"/>
+    <joint name="joint5" value="0"/>
+    <joint name="joint6" value="0"/>
+    <joint name="joint7" value="0"/>
+  </group_state>
+  <!-- 夹爪开口行程：0 = 实测闭合位，2 × 单指行程 = 全开位（stroke 默认 0.042726 m）。 -->
+  <group_state name="gripper_closed" group="gripper">
+    <joint name="gripper_opening_joint" value="0"/>
+  </group_state>
+  <group_state name="gripper_open" group="gripper">
+    <joint name="gripper_opening_joint" value="0.085452"/>
+  </group_state>
+
+  <!-- ── 虚拟关节：固定基座 ── -->
+  <virtual_joint name="virtual_joint" type="fixed" parent_frame="world" child_link="base_link"/>
+
+  <!-- ── 碰撞矩阵 ── -->
+  <!-- 机械臂内部：8 个结构相邻对（与 litearm_moveit_config 相同） -->
+  <disable_collisions link1="base_link" link2="joint1" reason="Adjacent"/>
+  <disable_collisions link1="joint1" link2="joint2" reason="Adjacent"/>
+  <disable_collisions link1="joint2" link2="joint3" reason="Adjacent"/>
+  <disable_collisions link1="joint3" link2="joint4" reason="Adjacent"/>
+  <disable_collisions link1="joint4" link2="joint5" reason="Adjacent"/>
+  <disable_collisions link1="joint5" link2="joint6" reason="Adjacent"/>
+  <disable_collisions link1="joint6" link2="joint7" reason="Adjacent"/>
+  <disable_collisions link1="joint7" link2="ee_link" reason="Adjacent"/>
+
+  <!-- 夹爪内部：夹爪本体与两条手指滑动关节、两个固定包络 -->
+  <disable_collisions link1="litegrip_base_link" link2="litegrip_gripper_slider_link1" reason="Adjacent"/>
+  <disable_collisions link1="litegrip_base_link" link2="litegrip_gripper_slider_link2" reason="Adjacent"/>
+  <disable_collisions link1="litegrip_base_link" link2="litegrip_finger_envelope_r" reason="Adjacent"/>
+  <disable_collisions link1="litegrip_base_link" link2="litegrip_finger_envelope_l" reason="Adjacent"/>
+
+  <!-- 两个包络在中间重叠（margin 向内扩），且相对位姿固定 -->
+  <disable_collisions link1="litegrip_finger_envelope_r" link2="litegrip_finger_envelope_l"
+                      reason="Always (MinDistance 0.2mm)"/>
+
+  <!-- 包络按设计包住手指全行程体积：表面不相交，点云测不出包含关系（见文件头） -->
+  <disable_collisions link1="litegrip_finger_envelope_r" link2="litegrip_gripper_slider_link1" reason="Always"/>
+  <disable_collisions link1="litegrip_finger_envelope_r" link2="litegrip_gripper_slider_link2" reason="Always"/>
+  <disable_collisions link1="litegrip_finger_envelope_l" link2="litegrip_gripper_slider_link1" reason="Always"/>
+  <disable_collisions link1="litegrip_finger_envelope_l" link2="litegrip_gripper_slider_link2" reason="Always"/>
+
+  <!-- 安装面：结构接触（见文件头说明；工具的点云近似可能漏判，手工固定保留） -->
+  <disable_collisions link1="ee_link" link2="litegrip_base_link" reason="Adjacent"/>
+  <!-- 夹爪内移 10.3 mm 后，尾部凸台与 joint7 输出端外壳在模型里重合。
+       两者经固定关节刚性相连，相对位姿永不变化，属于结构接触，不是规划
+       需要避开的区域。点云采样工具测不出这种面重合，必须手工禁用。 -->
+  <disable_collisions link1="joint7" link2="litegrip_base_link" reason="Adjacent"/>
+
+</robot>

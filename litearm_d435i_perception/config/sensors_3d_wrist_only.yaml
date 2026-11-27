@@ -1,0 +1,21 @@
+# sensors_3d_wrist_only.yaml — start_fixed_camera:=false 时使用。
+#
+# 只保留腕装相机，避免 move_group 订阅不存在的
+# /fixed_camera/depth/color/points 和 fixed_camera_* 帧。
+sensors:
+  - wrist_points
+
+wrist_points:
+  sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
+  point_cloud_topic: /camera/depth/color/points
+  max_range: 3.0
+  point_subsample: 3
+  # 0.03 m：覆盖 Gazebo 相机打时间戳与 TF 之间的位姿错位，避免手臂表面
+  # 点漏进 Octomap（理由见 sensors_3d_wrist.yaml）。
+  padding_offset: 0.03
+  padding_scale: 1.0
+  max_update_rate: 2.0
+  filtered_cloud_topic: /camera/depth/color/points_filtered
+
+octomap_frame: base_link
+octomap_resolution: 0.02

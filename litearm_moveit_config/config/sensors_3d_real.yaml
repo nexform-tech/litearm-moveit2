@@ -1,0 +1,68 @@
+# sensors_3d_real.yaml — 真机 D435i 点云进入 MoveIt Octomap 的配置。
+#
+# 数据链路
+# ========
+#   realsense2_camera
+#     /camera/depth/color/points   (PointCloud2, frame=camera_depth_optical_frame)
+#     -> cloud_envelope_filter     (可选 3cm 机器人包络过滤，RViz 标记切换)
+#     -> /camera/depth/color/points_envelope
+#     -> PointCloudOctomapUpdater  (本文件)
+#     -> Octomap (frame=base_link)
+#     -> /monitored_planning_scene
+#     -> OMPL 碰撞检查 / d435i_supervisor 剩余轨迹复检
+#
+# 相机固定外置（eye-to-hand），base_link 不随臂运动，所以 octomap_frame 用
+# base_link。点云帧是 depth optical；标定文件是 color optical。二者之间由
+# 驱动发布的 camera_link -> camera_*_optical_frame 静态 TF 连接，
+# scripts/camera_calibration_tf.py 只补 base_link -> camera_link 一段。
+#
+# 自滤波
+# ======
+# PointCloudOctomapUpdater 用 ShapeMask 把落在机器人碰撞体内部的点扣掉。
+# 真机上它依赖两件事：
+#   1. /joint_states 与点云 header.stamp 使用同一时钟（都用系统时间，
+#      use_sim_time=false）；
+#   2. 按点云时间戳能查到各 link 的 TF，且等待时间足够。
+# move_group 的 shape_transform_cache_lookup_wait_time 由 launch 参数
+# shape_tf_cache_wait 设置，真机默认 0.5 s。
+#
+# 模型内部的点由 ShapeMask 负责；模型外部还有一层 D435i 在“机械臂轮廓
+# vs 桌面/背景”处产生的中间深度飞点，它们会绕过 2 cm 自滤波、在 Octomap
+# 里堆成台阶状幽灵。cloud_envelope_filter 在点云进入本话题前，用
+# /camera/depth/camera_info 把每个点投回像素平面，按 2D 邻域深度跨度把
+# 它们削掉（flying_pixel_filter，默认开，阈值 0.03 m，半径 1 px）。
+# 如果相机内参话题改名，用 launch 参数 cloud_camera_info_topic 同步修改。
+#
+# 参数取值
+# ========
+# padding_offset 是“自滤波形状”的每侧膨胀，不是规划安全裕度。真机首轮用
+# 0.02 m：太小，手臂表面噪点会粘进地图变成幽灵障碍；太大，贴着手臂的薄
+# 障碍会被一起滤掉。规划裕度主要靠 octomap_resolution、已知静态场景的
+# padding 和低速。
+#
+# point_subsample / max_update_rate 是 CPU 与实时性的折中。D435i 30 Hz，
+# updater 限到 10 Hz；手臂首轮速度 0.08 缩放，10 Hz 足够。若 move_group
+# 的 CPU 仍然高，先把 point_subsample 提到 3~4，不要先降 max_update_rate
+# 到 5 Hz 以下，否则手臂运动时地图会留下旧位姿的残影。
+#
+# 如果启动时把 align_depth 关了，驱动可能发布 /camera/depth/points 而不是
+# /camera/depth/color/points；把下面的 point_cloud_topic 改成实际话题即可。
+
+sensors:
+  - d435i_points
+
+d435i_points:
+  sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
+  # cloud_envelope_filter 的输出：默认直通；在 RViz 里点击 /cloud_envelope_filter
+  # 的绿/灰标记后，再额外滤掉机器人碰撞模型 3 cm 内的点（内置 2 cm + 1 cm）。
+  # 如果关掉 start_cloud_envelope_filter，把这里改回 /camera/depth/color/points。
+  point_cloud_topic: /camera/depth/color/points_envelope
+  max_range: 2.5
+  point_subsample: 2
+  padding_offset: 0.02
+  padding_scale: 1.0
+  max_update_rate: 10.0
+  filtered_cloud_topic: /camera/depth/color/points_filtered
+
+octomap_frame: base_link
+octomap_resolution: 0.02

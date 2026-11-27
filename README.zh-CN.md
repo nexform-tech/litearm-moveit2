@@ -311,6 +311,23 @@ ls /dev/ttyACM*            # 应看到 /dev/ttyACM0
 帧的时候，并且会打一条 WARNING；如果成因还在，固件会重新置位，ENABLE 会带着原因报错。
 想让锁存故障**拦住启动**（例如刚出过事故、想先看清机械臂状态）就加 `clear_faults:=false`。
 
+### 真机 D435i 避障
+
+真机 D435i 避障栈在 `litearm_moveit_config`：
+
+```bash
+ros2 launch litearm_moveit_config litearm_real_avoidance.launch.py
+```
+
+它不启动 Gazebo，启动直连 USB 控制栈、MoveIt 和 RealSense，并运行对剩余
+轨迹复检的 supervisor。机械臂模型不含夹爪。
+
+**包里的手眼标定是参考值，不是通用标定。** 它只对应一台相机、一个安装
+位置。手眼变换是物理测量：换机器人、换相机、换安装位置，或相机被移动、
+碰过，都必须重新标定；即使同一工位复用，也要做点云/模型重合检查。具体
+流程和 launch 参数见
+[`litearm_moveit_config/README.zh-CN.md`](litearm_moveit_config/README.zh-CN.md)。
+
 ## 从另一个终端连上这套栈
 
 两个 launch 都把 ROS 域钉在 42 并开启仅本机发现，因此默认终端里什么都看不到，需要先
@@ -358,6 +375,8 @@ export ROS_DOMAIN_ID=42; export ROS_LOCALHOST_ONLY=1
 | 包 | 作用 |
 | --- | --- |
 | `litearm_moveit_config` | litearm 七轴臂的 MoveIt 2 配置：SRDF 与碰撞矩阵、KDL 运动学、由固件参数表派生的关节限位、OMPL 规划流水线、`moveit_controllers`、RViz 布局、launch 文件，以及验收探针 |
+| `litearm_obstacle_avoidance` | 机械臂 + LiteGrip 夹爪的组合描述与 SRDF：夹爪作为末端工具参与碰撞检查；规划参数复用 `litearm_moveit_config`。夹爪安装偏移按“拆掉 10.3 mm 端盖、尾部凸台占位”取 0.0538 m，；另含 `scene.yaml` 静态工位（scene_builder/scene_probe）、夹爪全行程保守包络（默认 10 mm 外扩，margin_probe 验收）、执行监督 avoid_supervisor（取消/重规划、失败后低速撤退、数据过期拒动，replan_probe/safety_probe 验收）与干跑验收 |
+| `litearm_d435i_perception` | Gazebo Classic 中固定外置 D435i 的感知避障演示：深度点云经 MoveIt Octomap（含机器人自滤波）进入 PlanningScene，支持位姿/关节目标、执行中剩余轨迹复检与“停 → 重规划”、可选 Gazebo 动态障碍；含 RViz 布局与验收探针 |
 
 其中两点在各自文件头部有详细说明，这里只给结论：
 

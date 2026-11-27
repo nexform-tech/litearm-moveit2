@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!--
+  litearm_litegrip_wrist.urdf.xacro — 腕装 D435i 的 MoveIt / robot_state_publisher
+  侧组合模型。
+
+  内容 = 旧包的「臂 + LiteGrip」组合模型 + 腕装相机 link / TF。相机只是机器人
+  的一个固定末端 link，不参与 litearm_arm 规划链（链尾仍是 ee_link）；
+  robot_state_publisher 会自然地发布 base_link -> ... -> camera_link ->
+  camera_*_optical_frame 的动态 TF。
+
+  固定外置相机的 litearm_litegrip.urdf.xacro 保持原样，两条链路互不影响。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="litearm">
+  <xacro:include filename="$(find litearm_obstacle_avoidance)/config/litearm_litegrip.urdf.xacro"/>
+  <xacro:include filename="$(find litearm_d435i_perception)/config/wrist_camera.xacro"/>
+</robot>

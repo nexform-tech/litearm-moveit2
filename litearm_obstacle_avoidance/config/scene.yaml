@@ -1,0 +1,50 @@
+# scene.yaml — 干跑/避障用的静态环境（工作台与已知障碍）。
+#
+# 由 scripts/scene_builder.py 读取，通过 /apply_planning_scene 以 diff 的
+# 形式写进 MoveIt 的 PlanningScene。数据驱动：改这里即可调整工位，不需要
+# 改代码或 launch。
+#
+# 坐标约定
+# ========
+# frame_id 是**固定**坐标系（base_link 的父级不随臂运动）。所有对象的
+# pose 都相对它给出。base_link 原点在机械臂底座下表面（z=0），底座网格
+# 占 z ∈ [0, 0.076]。
+#
+# 几何说明
+# ========
+# workbench 顶面在 z=-0.02、padding=0.01 → 碰撞有效顶面 z=-0.01，
+# 距底座下表面留 1 cm，避免起始状态就被判为与环境碰撞。
+# 注：Humble 的 moveit_msgs/CollisionObject 没有 padding 字段，scene_builder
+# 通过放大图元尺寸实现同样的外扩效果（box 三边各 +2p，cylinder 半径 +p）。
+# pillar 立在台面上（台面 z=-0.02），半径 40 mm、高 280 mm，中心
+# z = -0.02 + 0.14 = 0.12。
+#
+# ⚠ 这是测试工位，不是你们现场的实际尺寸。接真实场景时按实测替换；
+#   如果工作台/夹具挡住验收目标位形，规划会（正确地）失败。
+frame_id: base_link
+
+objects:
+  - id: workbench
+    shape: box
+    size: [0.90, 0.90, 0.10]       # x, y, z (m)
+    pose:
+      xyz: [0.10, 0.0, -0.07]      # 顶面 z = -0.02
+      rpy: [0.0, 0.0, 0.0]
+    padding: 0.01
+
+  - id: fixture_pillar
+    shape: cylinder
+    radius: 0.04
+    height: 0.28
+    pose:
+      xyz: [0.30, -0.25, 0.12]     # 底面 z = -0.02，落在台面上
+      rpy: [0.0, 0.0, 0.0]
+    padding: 0.01
+
+  - id: fixture_block
+    shape: box
+    size: [0.12, 0.12, 0.12]
+    pose:
+      xyz: [-0.30, 0.15, 0.04]     # 底面 z = -0.02，落在台面上
+      rpy: [0.0, 0.0, 0.0]
+    padding: 0.01
