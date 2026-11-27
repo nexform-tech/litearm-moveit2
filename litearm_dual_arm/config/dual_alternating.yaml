@@ -1,0 +1,50 @@
+# dual_alternating.yaml — 共享工作空间里的交替作业（无夹爪）。
+#
+# 两个单臂轮流进入共享区，另一条臂保持当前停车位并继续参与碰撞检查。
+# 首尾各用一次 both_arms 回到 ready，便于重复运行。
+#
+# 阶段字段：
+#   active: left_arm | right_arm | both_arms
+#   target: dual_goals.yaml 里的目标名
+#
+# 这些目标沿用 dual_goals.yaml 的 left_safe/right_safe/left_ready/right_ready；
+# 它们是在当前两臂 yaw=+90° 挂载下验证过的。改挂载后需要重新校验目标。
+frame: world
+scene: dual_alternating_static
+
+motion:
+  planning_time_s: 10.0
+  velocity_scaling: 0.10
+  acceleration_scaling: 0.10
+  samples: 20
+  goal_tolerance_rad: 0.020
+  execute_timeout_s: 30.0
+
+validation:
+  idle_tolerance_rad: 0.020
+  position_tolerance_m: 0.010
+
+stages:
+  - name: both_ready
+    active: both_arms
+    target: both_ready
+
+  - name: left_enter
+    active: left_arm
+    target: left_safe
+
+  - name: left_retreat
+    active: left_arm
+    target: left_ready
+
+  - name: right_enter
+    active: right_arm
+    target: right_safe
+
+  - name: right_retreat
+    active: right_arm
+    target: right_ready
+
+  - name: both_park
+    active: both_arms
+    target: both_ready

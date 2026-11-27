@@ -1,0 +1,35 @@
+# dual_arm_mounts.yaml — 左右 LiteArm 基座在 world 坐标系里的安装变换。
+#
+# 约定
+# ====
+# * `frame` 必须与双臂模型根 link 一致，当前只支持 `world`。
+# * `xyz` 单位 m，`rpy` 单位 rad，遵循 URDF 的固定轴 RPY（Rz(yaw)·Ry(pitch)·Rx(roll)）。
+# * `left` / `right` 的 xyz 是各自 `base_link` 原点在 `world` 中的位置。
+# * 当前默认值是**台架参考值**，不是实测标定：两臂并排、基座相距 0.76 m，
+#   各自向前（+X）伸展。真机执行前必须测量并置 `calibration.measured: true`。
+#
+# 末端工具
+# ========
+# 本期不带夹爪，`tool.type` 保持 `none`，MoveIt 的链末端是 `left_ee_link` /
+# `right_ee_link`。以后要加圆柱工具时把 type 改成 `cylinder` 并填实测尺寸；
+# 生成器会在 ee_link 后追加 `tool_link`，SRDF 的组末端也会跟着改。
+frame: world
+
+calibration:
+  measured: false
+  note: >-
+    台架参考值：左右基座 y=±0.38 m，基座平面 z=0。真机必须按实际安装测量
+    xyz/rpy，并复核两臂共享工作空间内的干涉区域；未测量的值不能用于执行。
+
+left:
+  xyz: [0.0, 0.38, 0.0]
+  rpy: [0.0, 0.0, 1.5707963267948966]  # 90 deg
+
+right:
+  xyz: [0.0, -0.38, 0.0]
+  rpy: [0.0, 0.0, 1.5707963267948966]  # 90 deg
+
+tool:
+  type: none
+  length: 0.0
+  radius: 0.0

@@ -1,0 +1,78 @@
+# dual_arm.rviz — 双臂 MoveIt 规划面板。
+#
+# 固定坐标系是 world；默认规划组是 both_arms。单臂模式在 MotionPlanning
+# 面板的 Planning Group 下拉框里切换到 left_arm / right_arm 即可，不需要
+# 重启栈。
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Workspace grid
+      Enabled: true
+      Alpha: 0.30
+      Cell Size: 0.10
+      Plane Cell Count: 24
+      Color: 105; 112; 125
+      Value: true
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+      Marker Scale: 0.18
+    - Class: moveit_rviz_plugin/MotionPlanning
+      Name: MotionPlanning
+      Enabled: true
+      Move Group Namespace: ""
+      Robot Description: robot_description
+      Planning Scene Topic: monitored_planning_scene
+      Planned Path:
+        Loop Animation: false
+        State Display Time: 0.03 s
+        Trajectory Topic: display_planned_path
+        Show Robot Visual: true
+        Show Robot Collision: false
+      Planning Request:
+        Planning Group: both_arms
+        Query Goal State: true
+        Query Start State: false
+        Show Workspace: false
+      Scene Geometry:
+        Scene Alpha: 0.72
+        Show Scene Geometry: true
+        Voxel Coloring: Z-Axis
+        Voxel Rendering: Occupied Voxels
+      Scene Robot:
+        Robot Alpha: 0.72
+        Show Scene Robot: true
+      Collision Contacts: 30
+      Value: true
+  Global Options:
+    Background Color: 32; 36; 43
+    Fixed Frame: world
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 2.4
+      Focal Point:
+        X: 0.20
+        Y: 0.0
+        Z: 0.45
+      Name: Current View
+      Pitch: 0.28
+      Target Frame: world
+      Yaw: 0.85
+    Saved: ~

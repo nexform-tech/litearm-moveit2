@@ -1,0 +1,68 @@
+# dual_ompl.yaml — 双臂 OMPL 规划流水线。
+#
+# 三组都在这一个 move_group 里：
+#   left_arm / right_arm : 单臂规划，另一条臂仍在场景里参与碰撞检查
+#   both_arms            : 14 自由度联合规划，左右互碰在规划器内部一起检查
+#
+# 单数与复数 planning_plugin 都要写。MoveIt 2 只给复数时，某些加载路径会
+# 回退到 CHOMP 并打印 "Using chomp_interface/CHOMPPlanner"，典型现象是
+# “规划成功但返回空轨迹”，非常难定位。
+planning_plugin: ompl_interface/OMPLPlanner
+planning_plugins:
+  - ompl_interface/OMPLPlanner
+
+# 适配器顺序按 MoveIt 的包装规则：列表第一项是最外层，预处理最先、后处理最后。
+# Ruckig 要在时间参数化之前加入，否则平滑结果会被后一步时间参数化覆盖。
+# 刻意不放 FixStartStateCollision：真机执行要求起点原样有效，不能让适配器
+# 悄悄把双臂挪到一个“更好”的起点。起点无效时应当拒绝规划并检查现场。
+request_adapters: >-
+  default_planner_request_adapters/AddRuckigTrajectorySmoothing
+  default_planner_request_adapters/AddTimeOptimalParameterization
+  default_planner_request_adapters/ResolveConstraintFrames
+  default_planner_request_adapters/FixWorkspaceBounds
+  default_planner_request_adapters/FixStartStateBounds
+  default_planner_request_adapters/FixStartStatePathConstraints
+
+start_state_max_bounds_error: 0.10
+
+planner_configs:
+  RRTConnectkConfigDefault:
+    type: geometric::RRTConnect
+    range: 0.0
+  RRTstar:
+    type: geometric::RRTstar
+    range: 0.0
+    goal_bias: 0.05
+    delay_collision_checking: 1
+  PRM:
+    type: geometric::PRM
+    max_nearest_neighbors: 12
+
+left_arm:
+  default_planner_config: RRTConnectkConfigDefault
+  planner_configs:
+    - RRTConnectkConfigDefault
+    - RRTstar
+    - PRM
+  projection_evaluator: joints(left_joint1,left_joint2)
+  longest_valid_segment_fraction: 0.005
+
+right_arm:
+  default_planner_config: RRTConnectkConfigDefault
+  planner_configs:
+    - RRTConnectkConfigDefault
+    - RRTstar
+    - PRM
+  projection_evaluator: joints(right_joint1,right_joint2)
+  longest_valid_segment_fraction: 0.005
+
+both_arms:
+  default_planner_config: RRTConnectkConfigDefault
+  planner_configs:
+    - RRTConnectkConfigDefault
+    - RRTstar
+    - PRM
+  # 14 维空间里用两侧肩关节投影，比单侧两关节更能区分左右臂构型。
+  projection_evaluator: joints(left_joint1,right_joint1)
+  # 双臂共享工作空间时路径段碰撞检查要更密；0.003 比单臂配置更保守。
+  longest_valid_segment_fraction: 0.003

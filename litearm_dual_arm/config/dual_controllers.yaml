@@ -1,0 +1,45 @@
+# dual_controllers.yaml — MoveIt 看到的左右执行通道。
+#
+# 这两个 action **不是** ros2_control 的 JTC 本身，而是 litearm_dual_arm
+# 执行桥暴露给 MoveIt 的名字；桥再把 7 关节子轨迹转发到
+# /left/joint_trajectory_controller 与 /right/joint_trajectory_controller。
+#
+# 命名契约：
+#   MoveIt 模型    left_joint1..7 / right_joint1..7
+#   ros2_control   joint1..7（两侧各自在 /left、/right 命名空间下）
+#
+# 不要把 14 关节组合控制器也列进 controller_names；MoveIt 的 simple
+# controller manager 会按关节集合选择控制器，组合控制器和左右控制器同时
+# 匹配时可能重复下发同一条轨迹。
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - left_arm_controller
+    - right_arm_controller
+
+  left_arm_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory
+    default: true
+    joints:
+      - left_joint1
+      - left_joint2
+      - left_joint3
+      - left_joint4
+      - left_joint5
+      - left_joint6
+      - left_joint7
+
+  right_arm_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory
+    default: true
+    joints:
+      - right_joint1
+      - right_joint2
+      - right_joint3
+      - right_joint4
+      - right_joint5
+      - right_joint6
+      - right_joint7

@@ -1,0 +1,69 @@
+# dual_scenes.yaml — 双臂共享工位的静态碰撞场景。
+#
+# 所有物体都在 `world` 坐标系里；move_group 只有一份 Planning Scene，
+# 左右臂看到的是同一批对象。`obstacle_padding_m` 是场景物体向外的安全膨胀，
+# `robot_padding_m` 由 launch 传给 move_group 的 planning.default_robot_padding。
+#
+# 尺寸是物理尺寸，场景构建节点会再加 padding。台面顶面在 z=-0.005 m，
+# 两个基座原点在 z=0；换台面或加垫高块时，必须同时改这里和 mounts。
+#
+# 这些值来自台架参考布置，不是实测工位。真机必须重新测量。
+safety:
+  obstacle_padding_m: 0.020
+  robot_padding_m: 0.020
+  velocity_scaling: 0.10
+  acceleration_scaling: 0.10
+  start_tolerance_rad: 0.080
+  goal_tolerance_rad: 0.020
+  max_sync_time_error_s: 0.050
+
+frames:
+  dual: world
+
+objects:
+  worktable:
+    type: box
+    pose: [0.25, 0.0, -0.035]
+    dimensions: [1.20, 1.20, 0.060]
+    color: [0.30, 0.34, 0.40, 0.90]
+
+  back_wall:
+    type: box
+    pose: [0.86, 0.0, 0.38]
+    dimensions: [0.040, 1.00, 0.760]
+    color: [0.22, 0.27, 0.33, 0.92]
+
+  divider:
+    type: box
+    pose: [0.42, 0.00, 0.180]
+    dimensions: [0.180, 0.120, 0.360]
+    color: [0.90, 0.38, 0.12, 0.85]
+
+  left_crate:
+    type: box
+    pose: [0.32, 0.24, 0.105]
+    dimensions: [0.170, 0.160, 0.210]
+    color: [0.16, 0.56, 0.88, 0.85]
+
+  right_crate:
+    type: box
+    pose: [0.32, -0.24, 0.105]
+    dimensions: [0.170, 0.160, 0.210]
+    color: [0.16, 0.56, 0.88, 0.85]
+
+scenes:
+  dual_static:
+    - worktable
+    - back_wall
+    - divider
+    - left_crate
+    - right_crate
+
+  # 同步搬运只用工作台；两臂在 y≈0.05、z≈0.45 的共享区作业，
+  # 台架参考的隔板/料箱会挡在中间，不适合作为第一版 carry 场景。
+  dual_carry_static:
+    - worktable
+
+  # 交替作业同样先用工作台作为共享场景。
+  dual_alternating_static:
+    - worktable
